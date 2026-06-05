@@ -1,0 +1,4 @@
+interface:
+  display_name: "HTML Companion"
+  short_description: "Local HTML visual companion for CLI agents."
+  default_prompt: "Use HTML Companion to start a local project-level visual interface and render agent output as interactive HTML panels."

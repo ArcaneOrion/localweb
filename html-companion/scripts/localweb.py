@@ -1,0 +1,723 @@
+# /// script
+# dependencies = [
+#   "fastapi>=0.115",
+#   "uvicorn>=0.30",
+# ]
+# ///
+import argparse
+import asyncio
+import json
+import re
+import shutil
+import socket
+import sys
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+SCHEMA_VERSION = 1
+DEFAULT_SESSION = "cli-main"
+DEFAULT_STATE = "idle"
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def skill_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def shell_source_dir() -> Path:
+    return skill_root() / "assets" / "shell"
+
+
+def resolve_project(project: str | None) -> Path:
+    return Path(project).expanduser().resolve() if project else Path.cwd().resolve()
+
+
+def localweb_dir(project: Path) -> Path:
+    return project / ".localweb"
+
+
+def state_path(project: Path) -> Path:
+    return localweb_dir(project) / "state.json"
+
+
+def events_path(project: Path) -> Path:
+    return localweb_dir(project) / "events.jsonl"
+
+
+def inbox_path(project: Path) -> Path:
+    return localweb_dir(project) / "inbox" / "events.jsonl"
+
+
+def shell_dir(project: Path) -> Path:
+    return localweb_dir(project) / "shell"
+
+
+def panels_dir(project: Path) -> Path:
+    return localweb_dir(project) / "panels"
+
+
+def assets_dir(project: Path) -> Path:
+    return localweb_dir(project) / "assets"
+
+
+def generated_assets_dir(project: Path) -> Path:
+    return assets_dir(project) / "generated"
+
+
+def safe_id(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip()).strip("-")
+    if not cleaned:
+        raise SystemExit("id must contain at least one letter, digit, '_' or '-'")
+    return cleaned
+
+
+def read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
+    if not path.exists():
+        return default.copy()
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Invalid JSON at {path}: {exc}") from exc
+
+
+def write_json(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def append_jsonl(path: Path, obj: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            out.append(value)
+    return out
+
+
+def default_state() -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "session_id": DEFAULT_SESSION,
+        "title": "HTML Companion",
+        "status": DEFAULT_STATE,
+        "active_panel": "panels/main.html",
+        "active_choice_id": None,
+        "updated_at": now_iso(),
+        "context": [
+            {"label": "Project", "value": "Current working directory"},
+            {"label": "Control", "value": "CLI terminal"},
+            {"label": "Panel", "value": "panels/main.html"},
+        ],
+        "choices": [],
+    }
+
+
+def default_panel_html() -> str:
+    return """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTML Companion Panel</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #101008;
+    --panel: #211d10;
+    --yellow: #ffd43b;
+    --cream: #fff3bf;
+    --cyan: #24d7ff;
+    --line: #050505;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--ink); color: var(--cream); }
+  body {
+    display: grid;
+    place-items: center;
+    padding: clamp(18px, 5vw, 64px);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  main {
+    width: min(980px, 100%);
+    border: 4px solid var(--line);
+    background: linear-gradient(135deg, #2f2812, #17140b 64%);
+    box-shadow: 10px 10px 0 var(--line);
+    padding: clamp(24px, 5vw, 56px);
+  }
+  .eyebrow {
+    display: inline-block;
+    background: var(--yellow);
+    color: var(--line);
+    border: 3px solid var(--line);
+    padding: 6px 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 22px 0 14px;
+    color: var(--yellow);
+    font-size: clamp(42px, 8vw, 96px);
+    line-height: .88;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+  p { max-width: 68ch; font-size: clamp(16px, 2vw, 22px); line-height: 1.6; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 28px; }
+  .cell { border: 3px solid var(--line); background: #fff3bf; color: var(--line); padding: 14px; min-height: 88px; }
+  .cell strong { display: block; font-size: 24px; color: #000; }
+  .cell span { display: block; margin-top: 8px; font-weight: 700; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow" data-lw-text="eyebrow">Local visual deck online</div>
+  <h1 data-lw-text="headline">HTML Companion</h1>
+  <p data-lw-text="summary">Generate or register an HTML panel from the CLI to replace this default view with a visual explanation, diagram, comparison, report, or interactive learning card.</p>
+  <section class="grid" aria-label="Runtime contract">
+    <div class="cell"><strong>01</strong><span>CLI owns context</span></div>
+    <div class="cell"><strong>02</strong><span>Web renders panels</span></div>
+    <div class="cell"><strong>03</strong><span>Choices return by wait</span></div>
+  </section>
+</main>
+</body>
+</html>
+"""
+
+
+def ensure_layout(project: Path) -> None:
+    for path in (
+        localweb_dir(project),
+        panels_dir(project),
+        localweb_dir(project) / "inbox",
+        assets_dir(project),
+        generated_assets_dir(project),
+        shell_dir(project),
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def copy_file(src: Path, dst: Path, force: bool) -> bool:
+    if dst.exists() and not force:
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    return True
+
+
+def init_project(project: Path, force: bool = False) -> dict[str, Any]:
+    ensure_layout(project)
+    created: list[str] = []
+    preserved: list[str] = []
+
+    defaults: list[tuple[Path, str]] = [
+        (state_path(project), json.dumps(default_state(), ensure_ascii=False, indent=2) + "\n"),
+        (events_path(project), ""),
+        (inbox_path(project), ""),
+        (panels_dir(project) / "main.html", default_panel_html()),
+    ]
+    for path, content in defaults:
+        if path.exists() and not force:
+            preserved.append(str(path))
+            continue
+        path.write_text(content, encoding="utf-8")
+        created.append(str(path))
+
+    src_shell = shell_source_dir()
+    if not src_shell.exists():
+        raise SystemExit(f"Missing shell assets: {src_shell}")
+    for src in src_shell.iterdir():
+        if src.is_file():
+            dst = shell_dir(project) / src.name
+            if copy_file(src, dst, force):
+                created.append(str(dst))
+            else:
+                preserved.append(str(dst))
+
+    append_jsonl(
+        events_path(project),
+        {
+            "type": "initialized",
+            "project_root": str(project),
+            "ts": now_iso(),
+        },
+    )
+    return {
+        "status": "ok",
+        "project_root": str(project),
+        "localweb_dir": str(localweb_dir(project)),
+        "created": created,
+        "preserved": preserved,
+        "next_command": f"uv run scripts/localweb.py serve --project {project} --port 8765",
+    }
+
+
+def require_initialized(project: Path) -> None:
+    if not state_path(project).exists():
+        raise SystemExit(f"{localweb_dir(project)} is not initialized. Run: localweb.py init --project {project}")
+
+
+def load_state(project: Path) -> dict[str, Any]:
+    state = read_json(state_path(project), default_state())
+    if state.get("schema_version") != SCHEMA_VERSION:
+        state["schema_version"] = SCHEMA_VERSION
+    return state
+
+
+def save_state(project: Path, state: dict[str, Any], event_type: str = "state_updated") -> None:
+    state["updated_at"] = now_iso()
+    write_json(state_path(project), state)
+    append_jsonl(
+        events_path(project),
+        {
+            "type": event_type,
+            "status": state.get("status"),
+            "active_panel": state.get("active_panel"),
+            "active_choice_id": state.get("active_choice_id"),
+            "ts": now_iso(),
+        },
+    )
+
+
+def parse_context(items: list[str] | None) -> list[dict[str, str]] | None:
+    if not items:
+        return None
+    context: list[dict[str, str]] = []
+    for item in items:
+        if "=" in item:
+            label, value = item.split("=", 1)
+        elif ":" in item:
+            label, value = item.split(":", 1)
+        else:
+            label, value = "Context", item
+        context.append({"label": label.strip(), "value": value.strip()})
+    return context
+
+
+def parse_options(options: list[str]) -> list[dict[str, str]]:
+    parsed: list[dict[str, str]] = []
+    for raw in options:
+        if "=" in raw:
+            opt_id, label = raw.split("=", 1)
+        elif ":" in raw:
+            opt_id, label = raw.split(":", 1)
+        else:
+            opt_id, label = raw, raw
+        opt_id = opt_id.strip()
+        label = label.strip()
+        if not opt_id or not label:
+            raise SystemExit(f"Invalid --option value: {raw!r}. Use A=Label.")
+        parsed.append({"id": opt_id, "label": label})
+    return parsed
+
+
+def print_json(obj: dict[str, Any]) -> None:
+    print(json.dumps(obj, ensure_ascii=False, indent=2))
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    print_json(init_project(resolve_project(args.project), force=args.force))
+
+
+def cmd_panel(args: argparse.Namespace) -> None:
+    project = resolve_project(args.project)
+    if not state_path(project).exists():
+        init_project(project)
+    panel_id = safe_id(args.id)
+    src = Path(args.file).expanduser().resolve()
+    if not src.exists() or not src.is_file():
+        raise SystemExit(f"Panel file not found: {src}")
+    dst = panels_dir(project) / f"{panel_id}.html"
+    dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    state = load_state(project)
+    if args.activate:
+        state["active_panel"] = f"panels/{panel_id}.html"
+    if args.title:
+        state["title"] = args.title
+    context = parse_context(args.context)
+    if context is not None:
+        state["context"] = context
+    save_state(project, state, event_type="panel_updated")
+    print_json({"status": "ok", "panel": f"panels/{panel_id}.html", "path": str(dst)})
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    project = resolve_project(args.project)
+    if not state_path(project).exists():
+        init_project(project)
+    state = load_state(project)
+    if args.state is not None:
+        state["status"] = args.state
+    if args.title is not None:
+        state["title"] = args.title
+    if args.session_id is not None:
+        state["session_id"] = args.session_id
+    if args.panel is not None:
+        state["active_panel"] = args.panel
+    context = parse_context(args.context)
+    if context is not None:
+        state["context"] = context
+    save_state(project, state)
+    print_json({"status": "ok", "state": state})
+
+
+def cmd_choice(args: argparse.Namespace) -> None:
+    project = resolve_project(args.project)
+    if not state_path(project).exists():
+        init_project(project)
+    choices = parse_options(args.option)
+    state = load_state(project)
+    state["active_choice_id"] = args.id
+    state["choices"] = choices
+    state["status"] = "waiting_for_user"
+    if args.title:
+        state["title"] = args.title
+    save_state(project, state, event_type="choice_requested")
+    print_json({"status": "ok", "choice_id": args.id, "choices": choices})
+
+
+def consumed_event_ids(project: Path) -> set[str]:
+    return {
+        str(event.get("event_id"))
+        for event in read_jsonl(events_path(project))
+        if event.get("type") == "choice_consumed" and event.get("event_id")
+    }
+
+
+def find_choice(project: Path, choice_id: str) -> dict[str, Any] | None:
+    consumed = consumed_event_ids(project)
+    for event in read_jsonl(inbox_path(project)):
+        if event.get("type") != "choice":
+            continue
+        if event.get("choice_id") != choice_id:
+            continue
+        event_id = str(event.get("event_id", ""))
+        if event_id and event_id not in consumed:
+            return event
+    return None
+
+
+def cmd_wait(args: argparse.Namespace) -> None:
+    project = resolve_project(args.project)
+    require_initialized(project)
+    start = time.monotonic()
+    timeout = args.timeout
+    while True:
+        event = find_choice(project, args.id)
+        if event:
+            event_id = str(event.get("event_id"))
+            append_jsonl(
+                events_path(project),
+                {
+                    "type": "choice_consumed",
+                    "event_id": event_id,
+                    "choice_id": args.id,
+                    "value": event.get("value"),
+                    "ts": now_iso(),
+                },
+            )
+            print(str(event.get("value", "")))
+            return
+        if timeout is not None and timeout >= 0 and time.monotonic() - start >= timeout:
+            raise SystemExit(f"Timed out waiting for choice id {args.id!r}")
+        time.sleep(args.interval)
+
+
+def cmd_emit(args: argparse.Namespace) -> None:
+    project = resolve_project(args.project)
+    if not state_path(project).exists():
+        init_project(project)
+    data: dict[str, Any] = {}
+    if args.data:
+        try:
+            parsed = json.loads(args.data)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"Invalid --data JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise SystemExit("--data must be a JSON object")
+        data = parsed
+    event = {
+        "type": args.type,
+        "message": args.message,
+        "ts": now_iso(),
+        **data,
+    }
+    append_jsonl(events_path(project), event)
+    print_json({"status": "ok", "event": event})
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:
+    project = resolve_project(args.project)
+    checks: list[dict[str, Any]] = []
+
+    checks.append({"name": "python", "status": "ok", "value": sys.version.split()[0]})
+    checks.append({"name": "skill-root", "status": "ok" if skill_root().exists() else "error", "value": str(skill_root())})
+    checks.append({"name": "shell-assets", "status": "ok" if shell_source_dir().exists() else "error", "value": str(shell_source_dir())})
+    try:
+        import fastapi  # type: ignore
+        import uvicorn  # type: ignore
+
+        checks.append({"name": "fastapi", "status": "ok", "value": getattr(fastapi, "__version__", "unknown")})
+        checks.append({"name": "uvicorn", "status": "ok", "value": getattr(uvicorn, "__version__", "unknown")})
+    except Exception as exc:
+        checks.append({"name": "server-deps", "status": "error", "value": str(exc)})
+
+    writable = project.exists() and project.is_dir() and os_access_write(project)
+    checks.append({"name": "project-writable", "status": "ok" if writable else "error", "value": str(project)})
+    checks.append({"name": "localweb-initialized", "status": "ok" if state_path(project).exists() else "missing", "value": str(localweb_dir(project))})
+
+    status = "ok" if all(c["status"] in {"ok", "missing"} for c in checks) else "error"
+    print_json({"status": status, "project_root": str(project), "checks": checks})
+
+
+def os_access_write(path: Path) -> bool:
+    probe = path / f".localweb-write-test-{uuid.uuid4().hex}"
+    try:
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def is_port_free(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def choose_port(host: str, requested: int) -> int:
+    for port in range(requested, requested + 50):
+        if is_port_free(host, port):
+            return port
+    raise SystemExit(f"No free port found from {requested} to {requested + 49}")
+
+
+def ensure_inside(root: Path, candidate: Path) -> Path:
+    resolved_root = root.resolve()
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError as exc:
+        raise PermissionError(f"Path escapes {resolved_root}: {resolved}") from exc
+    return resolved
+
+
+def create_app(project: Path):
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+
+    app = FastAPI(title="HTML Companion", docs_url=None, redoc_url=None)
+    lw_root = localweb_dir(project).resolve()
+
+    def file_response(root: Path, rel_path: str) -> FileResponse:
+        try:
+            target = ensure_inside(root, root / rel_path)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        if not target.exists() or not target.is_file():
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(target)
+
+    @app.get("/")
+    async def index() -> HTMLResponse:
+        index_path = shell_dir(project) / "index.html"
+        if not index_path.exists():
+            raise HTTPException(status_code=404, detail="shell not initialized")
+        return HTMLResponse(index_path.read_text(encoding="utf-8"))
+
+    @app.get("/api/state")
+    async def api_state() -> JSONResponse:
+        return JSONResponse(load_state(project))
+
+    @app.get("/api/stream")
+    async def api_stream():
+        async def event_stream():
+            last_state = 0.0
+            while True:
+                try:
+                    current = state_path(project).stat().st_mtime
+                    if current != last_state:
+                        last_state = current
+                        state = load_state(project)
+                        yield f"event: state\ndata: {json.dumps(state, ensure_ascii=False)}\n\n"
+                except FileNotFoundError:
+                    yield "event: error\ndata: {\"message\":\"state missing\"}\n\n"
+                await asyncio.sleep(0.5)
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @app.post("/api/choice")
+    async def api_choice(request: Request) -> JSONResponse:
+        body = await request.json()
+        state = load_state(project)
+        choice_id = body.get("choice_id") or state.get("active_choice_id")
+        value = body.get("value")
+        if not choice_id or not value:
+            raise HTTPException(status_code=400, detail="choice_id and value are required")
+        label = body.get("label") or value
+        event = {
+            "event_id": uuid.uuid4().hex,
+            "type": "choice",
+            "choice_id": str(choice_id),
+            "value": str(value),
+            "label": str(label),
+            "session_id": state.get("session_id", DEFAULT_SESSION),
+            "ts": now_iso(),
+        }
+        append_jsonl(inbox_path(project), event)
+        append_jsonl(events_path(project), {"type": "choice_received", **event})
+        return JSONResponse({"status": "ok", "event": event})
+
+    @app.get("/shell/{rel_path:path}")
+    async def shell_asset(rel_path: str) -> FileResponse:
+        return file_response(shell_dir(project), rel_path)
+
+    @app.get("/panels/{rel_path:path}")
+    async def panel_asset(rel_path: str) -> FileResponse:
+        return file_response(panels_dir(project), rel_path)
+
+    @app.get("/assets/{rel_path:path}")
+    async def asset(rel_path: str) -> FileResponse:
+        return file_response(assets_dir(project), rel_path)
+
+    @app.get("/health")
+    async def health() -> JSONResponse:
+        return JSONResponse({"status": "ok", "project_root": str(project), "localweb_dir": str(lw_root)})
+
+    return app
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    project = resolve_project(args.project)
+    if not state_path(project).exists():
+        if args.init:
+            init_project(project)
+        else:
+            raise SystemExit(f"{localweb_dir(project)} is not initialized. Run init or pass --init.")
+
+    host = args.host
+    if host != "127.0.0.1" and not args.allow_remote:
+        raise SystemExit("Refusing non-local host without --allow-remote")
+
+    port = choose_port(host, args.port)
+    url = f"http://{host}:{port}"
+    print_json(
+        {
+            "status": "ok",
+            "url": url,
+            "host": host,
+            "port": port,
+            "project_root": str(project),
+            "localweb_dir": str(localweb_dir(project)),
+            "note": "Press Ctrl+C to stop.",
+        }
+    )
+    sys.stdout.flush()
+
+    import uvicorn
+
+    uvicorn.run(create_app(project), host=host, port=port, log_level=args.log_level)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="localweb.py", description="Project-level HTML companion for CLI agents.")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def add_project(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--project", help="Project root. Defaults to current working directory.")
+
+    p = sub.add_parser("init", help="Initialize project-level .localweb directory.")
+    add_project(p)
+    p.add_argument("--force", action="store_true", help="Overwrite default files and shell assets.")
+    p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("doctor", help="Check runtime health.")
+    add_project(p)
+    p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("serve", help="Serve the local browser companion.")
+    add_project(p)
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--init", action="store_true", help="Initialize .localweb first if missing.")
+    p.add_argument("--allow-remote", action="store_true", help="Allow binding to a non-local host.")
+    p.add_argument("--log-level", default="warning")
+    p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("panel", help="Register an HTML panel.")
+    add_project(p)
+    p.add_argument("--id", required=True)
+    p.add_argument("--file", required=True)
+    p.add_argument("--title")
+    p.add_argument("--context", action="append", help="Context item as Label=Value. Repeatable.")
+    p.add_argument("--activate", action=argparse.BooleanOptionalAction, default=True)
+    p.set_defaults(func=cmd_panel)
+
+    p = sub.add_parser("status", help="Update shell status.")
+    add_project(p)
+    p.add_argument("--state")
+    p.add_argument("--title")
+    p.add_argument("--session-id")
+    p.add_argument("--panel")
+    p.add_argument("--context", action="append", help="Context item as Label=Value. Repeatable.")
+    p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("choice", help="Offer lightweight browser choices.")
+    add_project(p)
+    p.add_argument("--id", required=True)
+    p.add_argument("--title")
+    p.add_argument("--option", action="append", required=True, help="Choice as A=Label. Repeatable.")
+    p.set_defaults(func=cmd_choice)
+
+    p = sub.add_parser("wait", help="Wait for a browser choice and print its value.")
+    add_project(p)
+    p.add_argument("--id", required=True)
+    p.add_argument("--timeout", type=float, default=-1, help="Seconds to wait. Negative means forever.")
+    p.add_argument("--interval", type=float, default=0.2)
+    p.set_defaults(func=cmd_wait)
+
+    p = sub.add_parser("emit", help="Append an event to events.jsonl.")
+    add_project(p)
+    p.add_argument("--type", required=True)
+    p.add_argument("--message")
+    p.add_argument("--data", help="Extra JSON object merged into the event.")
+    p.set_defaults(func=cmd_emit)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

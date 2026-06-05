@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HTML Companion</title>
+  <link rel="stylesheet" href="/shell/theme.css">
+</head>
+<body>
+  <main class="deck" aria-label="HTML Companion">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">LW</span>
+        <div>
+          <h1>LOCALWEB COMPANION</h1>
+          <span id="subtitle">HTML DECK</span>
+        </div>
+      </div>
+      <dl class="status-strip">
+        <div><dt>STATUS</dt><dd id="status">BOOTING</dd></div>
+        <div><dt>SESSION</dt><dd id="session">...</dd></div>
+        <div><dt>PIPE</dt><dd id="pipe">READY</dd></div>
+        <div><dt>PANEL</dt><dd id="panel-name">...</dd></div>
+      </dl>
+    </header>
+
+    <section class="body-grid">
+      <aside class="context-pane" aria-label="Context">
+        <div class="pane-title">CONTEXT STACK</div>
+        <ol id="context-list" class="context-list"></ol>
+      </aside>
+
+      <section class="stage-wrap" aria-label="Live HTML stage">
+        <div class="stage-head">
+          <span>LIVE HTML STAGE</span>
+          <span id="updated-at">sync pending</span>
+        </div>
+        <div class="stage-shell">
+          <iframe id="stage-frame" title="Agent generated HTML panel" sandbox="allow-scripts allow-forms allow-popups allow-downloads"></iframe>
+        </div>
+        <div id="choices" class="choices" aria-label="Choices"></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/shell/app.js"></script>
+</body>
+</html>
+
