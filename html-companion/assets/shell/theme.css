@@ -263,6 +263,7 @@ button {
   background: var(--line);
   box-shadow: 8px 8px 0 var(--line);
   overflow: hidden;
+  position: relative;
 }
 
 #stage-frame {
@@ -272,6 +273,7 @@ button {
   border: 0;
   display: block;
   background: #111;
+  overflow: auto;
 }
 
 .choices {
