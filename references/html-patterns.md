@@ -1,62 +1,85 @@
 # HTML Panel Patterns
 
-Generate self-contained HTML panels when visual structure beats prose.
+当视觉结构比线性文字更适合表达任务时，生成 self-contained HTML panel。
 
-## Learning Explainer
+## 默认视觉方向
 
-Use for concepts, repo behavior, APIs, protocols, and algorithms.
+panel 可以拥有自己的视觉语言，但默认应尽量呼应 LocalWeb shell 的黄黑卡通终端风格，而不是生成通用 dashboard。
 
-Panel ingredients:
+建议：
 
-- TL;DR banner
-- clickable or hoverable process diagram
-- glossary strip
-- tabs for examples
-- optional context controls such as hotspots, filters, ranking chips, small forms, or next-step cards when the CLI agent needs a user signal
+- 使用硬黑描边、小圆角、清晰分区和高对比文字。
+- 优先使用 `#ffd43b` 黄、深黑/深棕背景、`#fff3bf` 奶油色内容面、`#24d7ff` 青色和 `#ff8f1f` 橙色点缀。
+- 布局应像“任务控制台”：主信息最大，辅助说明和操作靠边，不用大块空洞营销式 hero。
+- 可以使用网格、角标、编号、状态灯、粗体标签、漫画式阴影，但不要让装饰压过内容。
+- 字体可优先选择清晰的 monospace 或有技术感的 display 字体；避免默认 AI 风格的紫色渐变、泛白卡片流和过度圆角。
+- 如果任务需要不同基调，可以偏离默认风格，但要先服务任务语义，例如审查面板更克制，学习面板更友好，调试面板更强调证据。
 
-## Code Understanding
+## 最小交互建议
 
-Use for unfamiliar packages, modules, execution paths, or dependency maps.
+交互应嵌在信息附近，而不是被固定到底部或变成 A/B/C/D 模板。
 
-Panel ingredients:
+- 纯展示是有效输出；不需要用户继续推理时，不要强行加输入控件。
+- tab、筛选、hover、展开、局部排序等可以只在 panel 内部改变显示，不需要回传 CLI。
+- 只有需要 agent 继续使用用户补充上下文时，才提供明确的“发送到 CLI”按钮。
+- 提交内容优先整理成 Markdown 文本，让 CLI 像读取普通用户输入一样处理。
+- 不要把 Web 交互用于权限批准、命令执行、文件删除或网络授权。
 
-- module boxes and arrows
-- highlighted hot path
-- entry points
-- test surface
-- risk markers
+## 学习讲解
 
-## Planning and Comparison
+用于概念、仓库行为、API、协议和算法。
 
-Use when alternatives must be compared spatially.
+可包含：
 
-Panel ingredients:
+- TL;DR 横幅
+- 可点击或 hover 的流程图
+- 术语条
+- 示例 tab
+- 需要用户信号时才加入热点、筛选器、排序 chips、小表单或下一步卡片
 
-- side-by-side approaches
-- trade-off matrix
-- timeline
-- risk table
-- recommended path
+## 代码理解
 
-## Debugging and Review
+用于陌生包、模块、执行路径或依赖地图。
 
-Use for incident timelines, failing tests, annotated diffs, and root cause analysis.
+可包含：
 
-Panel ingredients:
+- 模块盒子和箭头
+- 高亮 hot path
+- 入口点
+- 测试表面
+- 风险标记
 
-- chronological event rail
-- failing command and output snippets
-- suspected causes
-- verification checklist
+## 计划和对比
 
-## Output Rules
+用于需要空间化比较多个方案的任务。
 
-- Prefer one complete HTML document per panel.
-- Inline CSS and JavaScript.
-- Avoid remote assets unless the user explicitly allows them.
-- Make the panel responsive inside an iframe.
-- Pure display is a first-class output. Add interactions only when they help the user express context that is hard to provide in CLI text.
-- When panel interaction must return to CLI, provide an explicit submit/send control and post a Markdown summary to the shell:
+可包含：
+
+- 并排方案
+- 取舍矩阵
+- 时间线
+- 风险表
+- 推荐路径
+
+## 调试和审查
+
+用于事故时间线、失败测试、带注释 diff 和根因分析。
+
+可包含：
+
+- 按时间排列的事件轨
+- 失败命令和输出片段
+- 可疑原因
+- 验证清单
+
+## 输出规则
+
+- 每个 panel 优先是一个完整 HTML 文档。
+- CSS 和 JavaScript 内联。
+- 除非用户明确允许，不要依赖远程资源。
+- panel 必须能在 iframe 中响应式显示。
+- 纯展示是一等输出。只有交互能帮助用户表达 CLI 里难以描述的上下文时，才加入交互。
+- 当 panel 交互必须回到 CLI 时，提供明确的提交/发送控件，并向 shell 发送 Markdown 摘要：
 
 ```js
 window.parent.postMessage({
@@ -67,5 +90,5 @@ window.parent.postMessage({
 }, "*");
 ```
 
-- Do not auto-send hover, drag, or exploratory clicks. Let those interactions update the panel locally until the user explicitly sends.
-- Mark visible text with `data-lw-text` when practical.
+- 不要自动发送 hover、拖拽或探索性点击。让这些交互先只更新 panel 本地状态，直到用户明确发送。
+- 实用时给可见文本标记 `data-lw-text`。
