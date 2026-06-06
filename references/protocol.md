@@ -1,8 +1,8 @@
-# HTML Companion Protocol
+# LocalWeb 文件协议
 
-The protocol is project-level. Runtime files live under the target project's `.localweb/` directory, never under the skill installation directory.
+LocalWeb 协议是项目级协议。运行时文件放在目标项目的 `.localweb/` 目录下，不能写入 skill 安装目录。
 
-## Directory
+## 目录结构
 
 ```text
 .localweb/
@@ -16,30 +16,30 @@ The protocol is project-level. Runtime files live under the target project's `.l
 
 ## `state.json`
 
-`state.json` is the current UI snapshot read by the shell.
+`state.json` 是 shell 读取的当前 UI 快照。
 
-Required fields:
+必要字段：
 
 ```json
 {
   "schema_version": 1,
   "session_id": "cli-main",
-  "title": "HTML Companion",
+  "title": "LocalWeb",
   "status": "idle",
   "active_panel": "panels/main.html",
   "active_choice_id": null,
   "updated_at": "2026-06-05T12:00:00+00:00",
-  "context": [{"label": "Task", "value": "Understand module flow"}],
-  "choices": [{"id": "source_path", "label": "Show source path"}]
+  "context": [{"label": "任务", "value": "理解模块流程"}],
+  "choices": [{"id": "source_path", "label": "看源码路径"}]
 }
 ```
 
-Rules:
+规则：
 
-- `active_panel` must point to a file below `.localweb/panels/`.
-- `choices` are optional, low-risk context inputs suggested by the CLI agent. They are not required for pure display panels.
-- Choice IDs are arbitrary safe strings, not fixed letters.
-- `active_choice_id` links browser input to `localweb wait --id`.
+- `active_panel` 必须指向 `.localweb/panels/` 下的文件。
+- `choices` 是 CLI agent 建议的可选低风险上下文输入；纯展示 panel 不需要 choices。
+- choice ID 是任意安全字符串，不是固定字母。
+- `active_choice_id` 用来把浏览器输入关联到 `localweb wait --id`。
 
 ## 事件（Events）
 
