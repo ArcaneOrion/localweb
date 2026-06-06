@@ -34,7 +34,24 @@ uv run html-companion/scripts/localweb.py serve --port 8765
 
 # 健康检查
 uv run html-companion/scripts/localweb.py doctor
+
+# 清理已消费事件（可选，定期执行）
+uv run html-companion/scripts/localweb.py clean
 ```
+
+## 核心命令
+
+| 命令 | 用途 |
+|------|------|
+| `init` | 初始化 .localweb 目录结构 |
+| `serve` | 启动 HTTP 服务器 |
+| `panel` | 注册 HTML panel |
+| `status` | 更新状态和上下文 |
+| `choice` | 创建选择项 |
+| `wait` | 阻塞等待用户点击 |
+| `clean` | 清理已消费事件 |
+| `doctor` | 环境检查 |
+| `emit` | 追加自定义事件 |
 
 ## 核心理念
 

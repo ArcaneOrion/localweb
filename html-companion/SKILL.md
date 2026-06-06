@@ -80,7 +80,21 @@ uv run scripts/localweb.py wait --id next
 
 For a live choice, run `wait` immediately after publishing the choices and keep the CLI turn open while the user clicks. Do not end the turn expecting a browser click to appear in the terminal automatically; the click is stored in `.localweb/inbox/events.jsonl` until `wait` consumes it.
 
-## Rules
+7. 定期清理已消费事件（可选）：
+
+```bash
+uv run scripts/localweb.py clean
+```
+
+这会从 inbox 中移除已消费和已作废的事件，保持文件精简。可以随时安全运行。
+
+## 关键行为
+
+- **choice ID 可以重复使用**：创建新的 `choice --id foo` 时，会自动作废同 ID 的所有未消费事件。这防止 `wait` 读取到过期的点击。
+- **Inbox 增长**：inbox 会累积所有点击，直到被清理。定期运行 `clean` 来移除已消费的事件。
+- **事件类型**：`choice_consumed`（被 wait 读取）、`choice_obsoleted`（被新 choice 替换）、`inbox_cleaned`（维护操作）。
+
+## 规则
 
 - Keep all runtime artifacts under the target project's `.localweb/`.
 - Do not write runtime state into the skill installation directory.
