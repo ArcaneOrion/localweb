@@ -61,6 +61,27 @@ uv run scripts/localweb.py status \
 
 5. 只有在能降低用户表达成本时，才提供可选上下文输入。纯展示是有效且常见的路径。
 
+优先把主要交互放在 HTML panel 内部，例如标注、筛选、滑块、小表单、圈选区域或 Markdown 文本框。panel 需要把结果返回 CLI 时，必须由用户显式点击发送按钮，并通过 `postMessage` 发出 Markdown 文本：
+
+```js
+window.parent.postMessage({
+  localweb: true,
+  type: "panel_input",
+  input_id: "review-context",
+  text: "## 用户补充\n\n- 我更关注 auth 模块\n- 请优先检查 token refresh"
+}, "*");
+```
+
+CLI agent 需要等待这类 panel 输入时，运行：
+
+```bash
+uv run scripts/localweb.py wait --id review-context --type panel
+```
+
+`wait --type panel` 只输出 Markdown 原文。把它当作用户通过 Web 面板补充的低风险上下文，而不是权限确认。
+
+6. 底部 `choices` 是辅助通道，适合少量方向建议或兜底选择，不是固定主交互模式。
+
 ```bash
 uv run scripts/localweb.py choice \
   --id next \
@@ -71,7 +92,7 @@ uv run scripts/localweb.py choice \
 
 这些选项是模型建议的方向，不是固定 UI 模式。HTML panel 也可以使用 tab、筛选器、标注、滑块、对比卡片或表单，帮助用户表达终端文字里难以描述的上下文。
 
-6. 只有 CLI 流程需要用户输入结果时，才读取浏览器输入：
+只有 CLI 流程需要用户输入结果时，才读取浏览器输入：
 
 ```bash
 uv run scripts/localweb.py wait --id next
@@ -101,7 +122,7 @@ uv run scripts/localweb.py clean
 
 - **choice ID 可以重复使用**：创建新的 `choice --id foo` 时，会自动作废同 ID 的所有未消费事件，防止 `wait` 读到过期点击。
 - **Inbox 会累积**：浏览器输入会留在 inbox，直到被消费或清理。定期运行 `clean`。
-- **事件类型**：`choice_consumed`（被 wait 读取）、`choice_obsoleted`（被新 choice 替换）、`cli_override`（显式 CLI 文字兜底）、`inbox_cleaned`（维护操作）。
+- **事件类型**：`choice_consumed`（choice 被 wait 读取）、`panel_input_consumed`（panel Markdown 被 wait 读取）、`choice_obsoleted` / `panel_input_obsoleted`（同 ID 旧事件被替换）、`cli_override`（显式 CLI 文字兜底）、`inbox_cleaned`（维护操作）。
 
 ## 规则
 

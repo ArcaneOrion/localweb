@@ -56,4 +56,16 @@ Panel ingredients:
 - Avoid remote assets unless the user explicitly allows them.
 - Make the panel responsive inside an iframe.
 - Pure display is a first-class output. Add interactions only when they help the user express context that is hard to provide in CLI text.
+- When panel interaction must return to CLI, provide an explicit submit/send control and post a Markdown summary to the shell:
+
+```js
+window.parent.postMessage({
+  localweb: true,
+  type: "panel_input",
+  input_id: "task-context",
+  text: "## 用户补充\n\n- ..."
+}, "*");
+```
+
+- Do not auto-send hover, drag, or exploratory clicks. Let those interactions update the panel locally until the user explicitly sends.
 - Mark visible text with `data-lw-text` when practical.

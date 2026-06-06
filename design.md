@@ -160,9 +160,10 @@ Web 提供上下文输入后写入：
 
 ```jsonl
 {"type":"choice","choice_id":"next","value":"source_path","label":"看源码路径","session_id":"codex-main","ts":"2026-06-05T17:40:20+08:00"}
+{"type":"panel_input","input_id":"review-context","text":"## 用户补充\n\n- 优先看 auth 模块","panel_id":"panels/review.html","session_id":"codex-main","ts":"2026-06-05T17:40:30+08:00"}
 ```
 
-agent CLI 只有在显式运行 `localweb wait --id next` 后，Web 输入才进入 CLI 输出，进而进入模型上下文。
+agent CLI 只有在显式运行 `localweb wait` 后，Web 输入才进入 CLI 输出，进而进入模型上下文。底部 choice 默认返回短值；panel input 需要 `--type panel`，返回 Markdown 原文。
 
 ## 5. CLI 脚本设计
 
@@ -178,6 +179,7 @@ uv run scripts/localweb.py panel --id main --file output.html
 uv run scripts/localweb.py status --title "学习图解" --state waiting_for_user
 uv run scripts/localweb.py choice --id next --option architecture="看架构" --option example="看示例"
 uv run scripts/localweb.py wait --id next
+uv run scripts/localweb.py wait --id review-context --type panel
 ```
 
 命令职责：
@@ -189,7 +191,7 @@ uv run scripts/localweb.py wait --id next
 | `panel` | 写入或注册一个 HTML panel |
 | `status` | 更新 `state.json` 的状态、标题、上下文 |
 | `choice` | 发布可选的建议型选择或上下文输入 |
-| `wait` | 阻塞等待 Web 输入，返回输入值 |
+| `wait` | 阻塞等待 Web 输入，返回 choice 短值或 panel Markdown |
 | `emit` | 追加事件到 `events.jsonl` |
 | `doctor` | 检查 Python、端口、目录权限和依赖 |
 
@@ -263,7 +265,16 @@ uv run scripts/localweb.py wait --id next
 source_path
 ```
 
-这样 agent 可以直接把它当作低风险上下文信号继续推理。
+panel input 的输出是用户显式发送的 Markdown 原文：
+
+```text
+## 用户补充
+
+- 优先看 auth 模块
+- 请检查 token refresh
+```
+
+这样 agent 可以直接把 stdout 当作低风险上下文信号继续推理。
 
 ## 6. 技术栈
 
@@ -403,12 +414,19 @@ Web 交互的目标不是替代 CLI 对话，而是让用户更容易提供 CLI 
 Web 到 CLI 的推荐路径：
 
 ```text
-用户在 Web 提供上下文输入
-  -> POST /api/inbox
+用户在底部辅助 choices 点击
+  -> POST /api/choice
   -> append .localweb/inbox/events.jsonl
   -> localweb wait --id next 返回 source_path
   -> CLI agent 看到 source_path
   -> 模型继续推理
+
+用户在 panel 内显式发送 Markdown
+  -> postMessage 到 shell
+  -> POST /api/panel-input
+  -> append .localweb/inbox/events.jsonl
+  -> localweb wait --id review-context --type panel 返回 Markdown
+  -> CLI agent 把 Markdown 当作用户补充上下文
 ```
 
 这保证 Web 输入不会成为“隐形上下文”，也不会绕过 CLI 权限面。

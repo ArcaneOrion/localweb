@@ -15,6 +15,7 @@
 
   let currentPanel = '';
   let lastChoiceKey = '';
+  const maxPanelInputChars = 20000;
 
   const statusLabels = {
     idle: '就绪',
@@ -130,6 +131,50 @@
     });
   }
 
+  function panelMessagePayload(event) {
+    if (event.source !== els.frame.contentWindow) return null;
+    const data = event.data;
+    if (!data || typeof data !== 'object') return null;
+    if (data.localweb !== true || data.type !== 'panel_input') return null;
+    const inputId = String(data.input_id || data.id || '').trim();
+    const text = typeof data.text === 'string' ? data.text : '';
+    if (!inputId || !text.trim() || text.length > maxPanelInputChars) return null;
+    const payload = {
+      input_id: inputId,
+      text,
+      panel_id: String(data.panel_id || currentPanel || ''),
+    };
+    if (data.label != null) payload.label = String(data.label);
+    if (data.meta && typeof data.meta === 'object' && !Array.isArray(data.meta)) {
+      payload.meta = data.meta;
+    }
+    return payload;
+  }
+
+  async function submitPanelInput(payload) {
+    els.pipe.textContent = '发送中';
+    const res = await fetch('/api/panel-input', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    els.pipe.textContent = '已发送';
+  }
+
+  function bindPanelBridge() {
+    window.addEventListener('message', async (event) => {
+      const payload = panelMessagePayload(event);
+      if (!payload) return;
+      try {
+        await submitPanelInput(payload);
+      } catch (err) {
+        els.pipe.textContent = '错误';
+        console.error('LocalWeb panel input failed', err);
+      }
+    });
+  }
+
   function renderState(state) {
     els.subtitle.textContent = state.title || 'HTML 舞台';
     els.status.textContent = statusLabel(state.status);
@@ -168,6 +213,7 @@
     };
   }
 
+  bindPanelBridge();
   loadState().catch(() => {});
   connectStream();
 })();

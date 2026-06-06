@@ -1,4 +1,4 @@
 interface:
-  display_name: "HTML Companion"
-  short_description: "Local HTML visual companion for CLI agents."
-  default_prompt: "Use HTML Companion to start a local project-level visual interface and render agent output as interactive HTML panels."
+  display_name: "LocalWeb"
+  short_description: "Local Web visual and context companion for CLI agents."
+  default_prompt: "Use LocalWeb to start a local project-level visual interface, render agent output as interactive HTML panels, and collect optional low-risk Markdown context for the CLI."

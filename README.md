@@ -86,6 +86,10 @@ uv run scripts/localweb.py choice --id next \
 uv run scripts/localweb.py wait --id next
 # 输出: source_path
 
+# panel 内嵌交互也可以显式发送 Markdown；CLI 等待时指定 --type panel
+uv run scripts/localweb.py wait --id review-context --type panel
+# 输出: ## 用户补充 ...
+
 # 如果用户不想点选，也允许在交互式 CLI 中直接输入文字
 uv run scripts/localweb.py wait --id next --cli-fallback
 ```

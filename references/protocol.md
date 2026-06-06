@@ -45,7 +45,7 @@ LocalWeb 协议是项目级协议。运行时文件放在目标项目的 `.local
 
 `events.jsonl` 是 agent 到 Web 的事件流和审计历史。每行都是一个 JSON 对象，至少包含 `type` 和 `ts` 字段。
 
-`inbox/events.jsonl` 是 Web 到 CLI 的低风险上下文输入流。MVP 的浏览器回传事件格式：
+`inbox/events.jsonl` 是 Web 到 CLI 的低风险上下文输入流。底部辅助选择事件格式：
 
 ```json
 {
@@ -59,9 +59,35 @@ LocalWeb 协议是项目级协议。运行时文件放在目标项目的 `.local
 }
 ```
 
-默认情况下，`wait` 命令只消费第一个未消费的匹配浏览器输入，并在 `events.jsonl` 中记录 `choice_consumed` 事件。纯展示 panel 不需要发布 `choices`，也不需要 `wait`。
+panel 内嵌交互需要返回 CLI 时，通过 shell bridge 写入 Markdown 输入事件：
 
-对于需要回到 CLI 的浏览器交互，先发布上下文输入，再在结束 CLI 回合前运行 `localweb wait --id <choice_id>`。浏览器点击或输入是持久化的 inbox 事件；它们不会自动出现在终端中，除非 CLI 命令去读取。
+```json
+{
+  "event_id": "uuid",
+  "type": "panel_input",
+  "input_id": "review-context",
+  "text": "## 用户补充\n\n- 我更关注 auth 模块",
+  "label": "风险关注点",
+  "panel_id": "panels/review.html",
+  "meta": {},
+  "session_id": "cli-main",
+  "ts": "2026-06-05T12:00:00+00:00"
+}
+```
+
+默认情况下，`wait` 命令只消费第一个未消费的匹配浏览器输入，并在 `events.jsonl` 中记录 consumed 事件。纯展示 panel 不需要发布 `choices`，也不需要 `wait`。
+
+对于需要回到 CLI 的浏览器交互，先发布上下文输入，再在结束 CLI 回合前运行 `localweb wait`。浏览器点击或输入是持久化的 inbox 事件；它们不会自动出现在终端中，除非 CLI 命令去读取。
+
+```bash
+# 底部辅助 choices：stdout 是短值，如 source_path
+uv run scripts/localweb.py wait --id next
+
+# panel 主交互：stdout 是 Markdown 原文
+uv run scripts/localweb.py wait --id review-context --type panel
+```
+
+`--type any` 可用于少数不关心来源的兼容场景；推荐 agent 默认明确选择 `choice` 或 `panel`。
 
 如果用户不想点选，可以显式运行 `localweb wait --id <choice_id> --cli-fallback`，允许交互式 TTY 中的文字输入作为兜底结果。该模式会记录 `cli_override`；管道 stdin 不会被默认当作选择。
 
@@ -75,6 +101,13 @@ LocalWeb 协议是项目级协议。运行时文件放在目标项目的 `.local
 - `choice_obsoleted`：新的 `choice` 命令使用相同 ID，作废旧的未消费事件，写入 `events.jsonl`
 - `cli_override`：显式启用 `--cli-fallback` 时，用户在交互式 CLI 输入文字，写入 `events.jsonl`
 
+### Panel Input 生命周期
+
+- `panel_input`：panel 通过 `postMessage` 显式发送 Markdown，上游 shell 写入 `inbox/events.jsonl`
+- `panel_input_received`：server 收到 panel 输入，写入 `events.jsonl`
+- `panel_input_consumed`：`wait --type panel` 读取事件，写入 `events.jsonl`
+- `panel_input_obsoleted`：同 `input_id` 的新 panel 输入作废旧的未消费事件，写入 `events.jsonl`
+
 ### 维护
 
 - `inbox_cleaned`：`clean` 命令从 inbox 移除已消费/已作废事件，写入 `events.jsonl`
@@ -84,6 +117,8 @@ LocalWeb 协议是项目级协议。运行时文件放在目标项目的 `.local
 创建新的 `choice --id foo` 会自动作废 inbox 中所有未消费的、相同 `choice_id` 的事件。这防止在多轮交互中重用 ID 时，`wait` 读取到过期的点击。
 
 `wait` 命令会跳过在 `events.jsonl` 中标记为 `choice_consumed` 或 `choice_obsoleted` 的事件。
+
+同一个 `input_id` 收到新的 `panel_input` 时，旧的未消费 panel 输入会被标记为 `panel_input_obsoleted`，避免 CLI 读到用户后来已经替换掉的 Markdown 草稿。
 
 ## Inbox 维护
 

@@ -21,6 +21,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 DEFAULT_SESSION = "cli-main"
 DEFAULT_STATE = "idle"
+MAX_PANEL_INPUT_CHARS = 20_000
 
 
 def now_iso() -> str:
@@ -120,7 +121,7 @@ def default_state() -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "session_id": DEFAULT_SESSION,
-        "title": "HTML Companion",
+        "title": "LocalWeb",
         "status": DEFAULT_STATE,
         "active_panel": "panels/main.html",
         "active_choice_id": None,
@@ -136,11 +137,11 @@ def default_state() -> dict[str, Any]:
 
 def default_panel_html() -> str:
     return """<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HTML Companion Panel</title>
+<title>LocalWeb Panel</title>
 <style>
   :root {
     color-scheme: dark;
@@ -194,12 +195,12 @@ def default_panel_html() -> str:
 <body>
 <main>
   <div class="eyebrow" data-lw-text="eyebrow">Local visual deck online</div>
-  <h1 data-lw-text="headline">HTML Companion</h1>
-  <p data-lw-text="summary">Generate or register an HTML panel from the CLI to replace this default view with a visual explanation, diagram, comparison, report, or interactive learning card.</p>
+  <h1 data-lw-text="headline">LocalWeb</h1>
+  <p data-lw-text="summary">Generate or register an HTML panel from the CLI to replace this default view with a visual explanation, diagram, comparison, report, or interactive context card.</p>
   <section class="grid" aria-label="Runtime contract">
     <div class="cell"><strong>01</strong><span>CLI owns context</span></div>
     <div class="cell"><strong>02</strong><span>Web renders panels</span></div>
-    <div class="cell"><strong>03</strong><span>Choices return by wait</span></div>
+    <div class="cell"><strong>03</strong><span>Inputs return by wait</span></div>
   </section>
 </main>
 </body>
@@ -407,7 +408,11 @@ def consumed_event_ids(project: Path) -> set[str]:
     return {
         str(event.get("event_id"))
         for event in read_jsonl(events_path(project))
-        if event.get("type") in ("choice_consumed", "choice_obsoleted") and event.get("event_id")
+        if (
+            event.get("type")
+            in ("choice_consumed", "choice_obsoleted", "panel_input_consumed", "panel_input_obsoleted")
+            and event.get("event_id")
+        )
     }
 
 
@@ -430,12 +435,44 @@ def obsolete_old_choices(project: Path, choice_id: str) -> None:
                 )
 
 
+def obsolete_old_panel_inputs(project: Path, input_id: str) -> None:
+    """标记同 input_id 的所有未消费 panel 输入为已作废"""
+    consumed = consumed_event_ids(project)
+    for event in read_jsonl(inbox_path(project)):
+        if event.get("type") == "panel_input" and event.get("input_id") == input_id:
+            event_id = str(event.get("event_id", ""))
+            if event_id and event_id not in consumed:
+                append_jsonl(
+                    events_path(project),
+                    {
+                        "type": "panel_input_obsoleted",
+                        "event_id": event_id,
+                        "input_id": input_id,
+                        "reason": "new panel input received with same id",
+                        "ts": now_iso(),
+                    },
+                )
+
+
 def find_choice(project: Path, choice_id: str) -> dict[str, Any] | None:
     consumed = consumed_event_ids(project)
     for event in read_jsonl(inbox_path(project)):
         if event.get("type") != "choice":
             continue
         if event.get("choice_id") != choice_id:
+            continue
+        event_id = str(event.get("event_id", ""))
+        if event_id and event_id not in consumed:
+            return event
+    return None
+
+
+def find_panel_input(project: Path, input_id: str) -> dict[str, Any] | None:
+    consumed = consumed_event_ids(project)
+    for event in read_jsonl(inbox_path(project)):
+        if event.get("type") != "panel_input":
+            continue
+        if event.get("input_id") != input_id:
             continue
         event_id = str(event.get("event_id", ""))
         if event_id and event_id not in consumed:
@@ -458,11 +495,62 @@ def consume_choice(project: Path, choice_id: str, event: dict[str, Any]) -> str:
     return str(event.get("value", ""))
 
 
+def consume_panel_input(project: Path, input_id: str, event: dict[str, Any]) -> str:
+    event_id = str(event.get("event_id"))
+    text = str(event.get("text", ""))
+    append_jsonl(
+        events_path(project),
+        {
+            "type": "panel_input_consumed",
+            "event_id": event_id,
+            "input_id": input_id,
+            "text": text,
+            "ts": now_iso(),
+        },
+    )
+    return text
+
+
+def find_wait_event(project: Path, wait_id: str, wait_type: str) -> tuple[str, dict[str, Any]] | None:
+    if wait_type in ("choice", "any"):
+        event = find_choice(project, wait_id)
+        if event:
+            return ("choice", event)
+    if wait_type in ("panel", "any"):
+        event = find_panel_input(project, wait_id)
+        if event:
+            return ("panel", event)
+    return None
+
+
+def consume_wait_event(project: Path, wait_id: str, result: tuple[str, dict[str, Any]]) -> str:
+    event_type, event = result
+    if event_type == "choice":
+        return consume_choice(project, wait_id, event)
+    return consume_panel_input(project, wait_id, event)
+
+
+def cli_override_event(wait_id: str, wait_type: str, value: str) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "type": "cli_override",
+        "wait_type": wait_type,
+        "value": value,
+        "reason": "interactive tty fallback",
+        "ts": now_iso(),
+    }
+    if wait_type in ("choice", "any"):
+        event["choice_id"] = wait_id
+    if wait_type in ("panel", "any"):
+        event["input_id"] = wait_id
+    return event
+
+
 def cmd_wait(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     require_initialized(project)
     start = time.monotonic()
     timeout = args.timeout
+    wait_type = args.type
 
     cli_fallback = bool(args.cli_fallback)
     select_module = None
@@ -476,9 +564,9 @@ def cmd_wait(args: argparse.Namespace) -> None:
         select_module = select
 
     while True:
-        event = find_choice(project, args.id)
-        if event:
-            print(consume_choice(project, args.id, event))
+        result = find_wait_event(project, args.id, wait_type)
+        if result:
+            print(consume_wait_event(project, args.id, result))
             return
 
         if cli_fallback and select_module is not None:
@@ -489,25 +577,16 @@ def cmd_wait(args: argparse.Namespace) -> None:
                 except (EOFError, OSError):
                     user_input = ""
                 if user_input:
-                    event = find_choice(project, args.id)
-                    if event:
-                        print(consume_choice(project, args.id, event))
+                    result = find_wait_event(project, args.id, wait_type)
+                    if result:
+                        print(consume_wait_event(project, args.id, result))
                         return
-                    append_jsonl(
-                        events_path(project),
-                        {
-                            "type": "cli_override",
-                            "choice_id": args.id,
-                            "value": user_input,
-                            "reason": "interactive tty fallback",
-                            "ts": now_iso(),
-                        },
-                    )
+                    append_jsonl(events_path(project), cli_override_event(args.id, wait_type, user_input))
                     print(user_input)
                     return
 
         if timeout is not None and timeout >= 0 and time.monotonic() - start >= timeout:
-            raise SystemExit(f"Timed out waiting for choice id {args.id!r}")
+            raise SystemExit(f"Timed out waiting for {wait_type} input id {args.id!r}")
 
         time.sleep(args.interval)
 
@@ -641,8 +720,17 @@ def create_app(project: Path):
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
-    app = FastAPI(title="HTML Companion", docs_url=None, redoc_url=None)
+    app = FastAPI(title="LocalWeb", docs_url=None, redoc_url=None)
     lw_root = localweb_dir(project).resolve()
+
+    async def request_json_object(request: Request) -> dict[str, Any]:
+        try:
+            body = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="JSON body must be an object")
+        return body
 
     def file_response(root: Path, rel_path: str) -> FileResponse:
         try:
@@ -683,7 +771,7 @@ def create_app(project: Path):
 
     @app.post("/api/choice")
     async def api_choice(request: Request) -> JSONResponse:
-        body = await request.json()
+        body = await request_json_object(request)
         state = load_state(project)
         choice_id = body.get("choice_id") or state.get("active_choice_id")
         value = body.get("value")
@@ -700,7 +788,39 @@ def create_app(project: Path):
             "ts": now_iso(),
         }
         append_jsonl(inbox_path(project), event)
-        append_jsonl(events_path(project), {"type": "choice_received", **event})
+        append_jsonl(events_path(project), {**event, "type": "choice_received"})
+        return JSONResponse({"status": "ok", "event": event})
+
+    @app.post("/api/panel-input")
+    async def api_panel_input(request: Request) -> JSONResponse:
+        body = await request_json_object(request)
+        state = load_state(project)
+        input_id = str(body.get("input_id") or body.get("id") or "").strip()
+        text = body.get("text")
+        if not input_id or not re.fullmatch(r"[a-zA-Z0-9_-]+", input_id):
+            raise HTTPException(status_code=400, detail="input_id must contain only letters, digits, '_' or '-'")
+        if not isinstance(text, str) or not text.strip():
+            raise HTTPException(status_code=400, detail="text is required")
+        if len(text) > MAX_PANEL_INPUT_CHARS:
+            raise HTTPException(status_code=413, detail=f"text exceeds {MAX_PANEL_INPUT_CHARS} characters")
+        meta = body.get("meta")
+        if meta is not None and not isinstance(meta, dict):
+            raise HTTPException(status_code=400, detail="meta must be an object")
+
+        obsolete_old_panel_inputs(project, input_id)
+        event = {
+            "event_id": uuid.uuid4().hex,
+            "type": "panel_input",
+            "input_id": input_id,
+            "text": text,
+            "label": str(body.get("label") or ""),
+            "panel_id": str(body.get("panel_id") or state.get("active_panel") or ""),
+            "meta": meta or {},
+            "session_id": state.get("session_id", DEFAULT_SESSION),
+            "ts": now_iso(),
+        }
+        append_jsonl(inbox_path(project), event)
+        append_jsonl(events_path(project), {**event, "type": "panel_input_received"})
         return JSONResponse({"status": "ok", "event": event})
 
     @app.get("/shell/{rel_path:path}")
@@ -804,9 +924,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--option", action="append", required=True, help="Choice as A=Label. Repeatable.")
     p.set_defaults(func=cmd_choice)
 
-    p = sub.add_parser("wait", help="Wait for a browser choice and print its value.")
+    p = sub.add_parser("wait", help="Wait for browser input and print its value.")
     add_project(p)
     p.add_argument("--id", required=True)
+    p.add_argument("--type", choices=("choice", "panel", "any"), default="choice", help="Input type to consume.")
     p.add_argument("--timeout", type=float, default=-1, help="Seconds to wait. Negative means forever.")
     p.add_argument("--interval", type=float, default=0.2)
     p.add_argument("--cli-fallback", action="store_true", help="Allow typed TTY input as an explicit fallback.")
