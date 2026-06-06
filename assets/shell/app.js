@@ -6,6 +6,8 @@
     pipe: document.getElementById('pipe'),
     panelName: document.getElementById('panel-name'),
     updatedAt: document.getElementById('updated-at'),
+    bodyGrid: document.getElementById('body-grid'),
+    contextPane: document.getElementById('context-pane'),
     contextList: document.getElementById('context-list'),
     frame: document.getElementById('stage-frame'),
     choices: document.getElementById('choices'),
@@ -13,6 +15,16 @@
 
   let currentPanel = '';
   let lastChoiceKey = '';
+
+  const statusLabels = {
+    idle: '就绪',
+    booting: '启动中',
+    waiting_for_user: '等待输入',
+    learning: '学习中',
+    reviewing: '审查中',
+    running: '运行中',
+    error: '错误',
+  };
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -25,19 +37,42 @@
   }
 
   function panelLabel(panel) {
-    return String(panel || '').replace(/^panels\//, '') || 'none';
+    return String(panel || '').replace(/^panels\//, '') || '无面板';
+  }
+
+  function statusLabel(status) {
+    const raw = String(status || 'idle');
+    return statusLabels[raw] || raw.replace(/_/g, ' ');
+  }
+
+  function timeLabel(value) {
+    if (!value) return '等待同步';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return `同步 ${new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(date)}`;
   }
 
   function renderContext(items) {
     const list = Array.isArray(items) ? items : [];
     if (!list.length) {
-      els.contextList.innerHTML = '<li><b>01</b><span><strong>No context</strong><em>CLI has not set context yet</em></span></li>';
+      els.contextList.innerHTML = '';
+      els.contextPane.classList.add('is-empty');
+      els.bodyGrid.classList.add('context-empty');
       return;
     }
-    els.contextList.innerHTML = list.map((item, index) => {
+    els.contextPane.classList.remove('is-empty');
+    els.bodyGrid.classList.remove('context-empty');
+    const visible = list.slice(0, 4);
+    els.contextList.innerHTML = visible.map((item, index) => {
       const n = String(index + 1).padStart(2, '0');
-      return `<li><b>${n}</b><span><strong>${esc(item.label || 'Context')}</strong><em>${esc(item.value || '')}</em></span></li>`;
-    }).join('');
+      return `<li><b>${n}</b><span><strong>${esc(item.label || '上下文')}</strong><em>${esc(item.value || '')}</em></span></li>`;
+    }).join('') + (list.length > visible.length
+      ? `<li class="context-more"><span>还有 ${list.length - visible.length} 项上下文</span></li>`
+      : '');
   }
 
   function renderChoices(state) {
@@ -46,23 +81,25 @@
     if (key === lastChoiceKey) return;
     lastChoiceKey = key;
     if (!choices.length) {
-      els.choices.innerHTML = '<div class="choice-empty">NO ACTIVE CHOICES</div>';
-      els.pipe.textContent = 'READY';
+      els.choices.innerHTML = '';
+      els.choices.classList.add('is-empty');
+      els.pipe.textContent = '就绪';
       return;
     }
-    els.pipe.textContent = 'WAITING';
+    els.pipe.textContent = '等待输入';
+    els.choices.classList.remove('is-empty');
     els.choices.innerHTML = choices.map((choice) => {
       const id = choice.id || choice.value || '';
       const label = choice.label || id;
       return `<button class="choice-btn" data-choice="${esc(id)}" data-label="${esc(label)}">
-        <span>${esc(id)}</span><strong>${esc(label)}</strong>
+        <span class="choice-id">${esc(id)}</span><strong>${esc(label)}</strong>
       </button>`;
     }).join('');
     els.choices.querySelectorAll('.choice-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
         if (btn.disabled) return;
         btn.disabled = true;
-        els.pipe.textContent = 'SENDING';
+        els.pipe.textContent = '发送中';
         try {
           const res = await fetch('/api/choice', {
             method: 'POST',
@@ -74,17 +111,17 @@
             }),
           });
           if (!res.ok) throw new Error(await res.text());
-          els.pipe.textContent = 'SENT';
+          els.pipe.textContent = '已发送';
           els.choices.querySelectorAll('.choice-btn').forEach((b) => {
             if (b !== btn) b.disabled = true;
           });
           btn.classList.add('sent');
           const note = document.createElement('div');
           note.className = 'choice-sent-note';
-          note.textContent = 'SENT TO INBOX - CLI reads it with localweb wait';
+          note.textContent = '已发送到 CLI 等待队列';
           els.choices.appendChild(note);
         } catch (err) {
-          els.pipe.textContent = 'ERROR';
+          els.pipe.textContent = '错误';
           btn.disabled = false;
           btn.classList.add('error');
           btn.title = String(err && err.message ? err.message : err);
@@ -94,11 +131,11 @@
   }
 
   function renderState(state) {
-    els.subtitle.textContent = state.title || 'HTML DECK';
-    els.status.textContent = String(state.status || 'idle').toUpperCase();
+    els.subtitle.textContent = state.title || 'HTML 舞台';
+    els.status.textContent = statusLabel(state.status);
     els.session.textContent = state.session_id || 'cli-main';
     els.panelName.textContent = panelLabel(state.active_panel);
-    els.updatedAt.textContent = state.updated_at || 'not synced';
+    els.updatedAt.textContent = timeLabel(state.updated_at);
     renderContext(state.context);
     renderChoices(state);
 

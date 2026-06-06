@@ -2,7 +2,7 @@
 
 > Local HTML companion for CLI agents
 
-本地 HTML 伴生界面，为 CLI agent 提供可视化投影层。CLI 保持主控制面和会话上下文，Web 提供高带宽可视化输出和轻量交互。
+本地 HTML 伴生界面，为 CLI agent 提供可视化投影层。CLI 保持主控制面、权限面和会话上下文，Web 提供高带宽可视化输出和可选的上下文交互。
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -10,7 +10,7 @@
 ## ✨ 特性
 
 - 🎨 **富文本 HTML panels** - 代码解释、图表、学习材料
-- 🔄 **轻量选择交互** - A/B/C/D 选择返回 CLI
+- 🔄 **上下文交互** - 可选方向建议、标注、筛选、排序或小表单返回 CLI
 - 📁 **文件协议解耦** - 独立、可审计、项目级
 - 🔒 **默认安全** - localhost 绑定、无自动执行
 - 🧹 **自动维护** - choice ID 重用安全、inbox 可清理
@@ -29,10 +29,11 @@ uv run scripts/localweb.py serve --port 8765
 
 ## 📖 使用场景
 
-- **教学复杂概念** - 可视化图解 + 交互式学习路径
-- **代码审查** - 带注解的 diff + 多视角对比
-- **交互式调试** - 可视化状态 + 步进控制
+- **教学复杂概念** - 可视化图解 + 可选学习路径
+- **代码审查** - 带注解的 diff + 点击关注风险点
+- **交互式调试** - 可视化状态 + 标记卡住步骤
 - **多步骤规划** - 可视化上下文 + 进度追踪
+- **需求澄清** - 用卡片、滑块或表单收集难以在 CLI 中表达的约束
 
 ## 📋 核心命令
 
@@ -42,8 +43,8 @@ uv run scripts/localweb.py serve --port 8765
 | `serve` | 启动 HTTP 服务器 |
 | `panel` | 注册 HTML panel |
 | `status` | 更新状态和上下文 |
-| `choice` | 创建选择项 |
-| `wait` | 阻塞等待用户点击 |
+| `choice` | 发布可选的建议型选择或上下文输入 |
+| `wait` | 显式等待 Web 输入返回 CLI，可启用 CLI 文字兜底 |
 | `clean` | 清理已消费事件 |
 | `doctor` | 环境检查 |
 | `emit` | 追加自定义事件 |
@@ -75,21 +76,24 @@ uv run scripts/localweb.py status \
   --context "任务=理解 React Fiber" \
   --context "阶段=核心概念"
 
-# 3. 提供选择
+# 3. 需要用户方向时，提供可选上下文输入；纯展示时可省略
 uv run scripts/localweb.py choice --id next \
-  --option A="看整体流程" \
-  --option B="看源码路径" \
-  --option C="做练习"
+  --option overview="看整体流程" \
+  --option source_path="看源码路径" \
+  --option exercise="做练习"
 
-# 4. 等待用户点击（返回 A/B/C）
+# 4. 只有 agent 需要继续推理时才等待输入
 uv run scripts/localweb.py wait --id next
-# 输出: B
+# 输出: source_path
+
+# 如果用户不想点选，也允许在交互式 CLI 中直接输入文字
+uv run scripts/localweb.py wait --id next --cli-fallback
 ```
 
 ## 💡 核心理念
 
 - **CLI 为主上下文** - 终端是唯一的会话和权限控制面
-- **Web 为投影层** - 浏览器只做可视化和低风险选择
+- **Web 为投影层** - 浏览器做可视化和低风险上下文输入，不处理权限
 - **文件协议解耦** - CLI/Server/Browser 通过文件通信
 - **显式控制流** - agent 显式调用 `wait`，无隐形输入
 

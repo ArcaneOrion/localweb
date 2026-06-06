@@ -12,7 +12,7 @@ Panel ingredients:
 - clickable or hoverable process diagram
 - glossary strip
 - tabs for examples
-- A/B/C/D next-step choices in the shell, not inside risky panel logic
+- optional context controls such as hotspots, filters, ranking chips, small forms, or next-step cards when the CLI agent needs a user signal
 
 ## Code Understanding
 
@@ -55,5 +55,5 @@ Panel ingredients:
 - Inline CSS and JavaScript.
 - Avoid remote assets unless the user explicitly allows them.
 - Make the panel responsive inside an iframe.
+- Pure display is a first-class output. Add interactions only when they help the user express context that is hard to provide in CLI text.
 - Mark visible text with `data-lw-text` when practical.
-

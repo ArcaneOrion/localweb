@@ -443,29 +443,72 @@ def find_choice(project: Path, choice_id: str) -> dict[str, Any] | None:
     return None
 
 
+def consume_choice(project: Path, choice_id: str, event: dict[str, Any]) -> str:
+    event_id = str(event.get("event_id"))
+    append_jsonl(
+        events_path(project),
+        {
+            "type": "choice_consumed",
+            "event_id": event_id,
+            "choice_id": choice_id,
+            "value": event.get("value"),
+            "ts": now_iso(),
+        },
+    )
+    return str(event.get("value", ""))
+
+
 def cmd_wait(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     require_initialized(project)
     start = time.monotonic()
     timeout = args.timeout
+
+    cli_fallback = bool(args.cli_fallback)
+    select_module = None
+    if cli_fallback:
+        if not sys.stdin.isatty():
+            raise SystemExit("--cli-fallback requires interactive TTY stdin")
+        try:
+            import select
+        except ImportError as exc:
+            raise SystemExit("--cli-fallback requires select support") from exc
+        select_module = select
+
     while True:
         event = find_choice(project, args.id)
         if event:
-            event_id = str(event.get("event_id"))
-            append_jsonl(
-                events_path(project),
-                {
-                    "type": "choice_consumed",
-                    "event_id": event_id,
-                    "choice_id": args.id,
-                    "value": event.get("value"),
-                    "ts": now_iso(),
-                },
-            )
-            print(str(event.get("value", "")))
+            print(consume_choice(project, args.id, event))
             return
+
+        if cli_fallback and select_module is not None:
+            readable, _, _ = select_module.select([sys.stdin], [], [], 0)
+            if readable:
+                try:
+                    user_input = sys.stdin.readline().strip()
+                except (EOFError, OSError):
+                    user_input = ""
+                if user_input:
+                    event = find_choice(project, args.id)
+                    if event:
+                        print(consume_choice(project, args.id, event))
+                        return
+                    append_jsonl(
+                        events_path(project),
+                        {
+                            "type": "cli_override",
+                            "choice_id": args.id,
+                            "value": user_input,
+                            "reason": "interactive tty fallback",
+                            "ts": now_iso(),
+                        },
+                    )
+                    print(user_input)
+                    return
+
         if timeout is not None and timeout >= 0 and time.monotonic() - start >= timeout:
             raise SystemExit(f"Timed out waiting for choice id {args.id!r}")
+
         time.sleep(args.interval)
 
 
@@ -766,6 +809,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", required=True)
     p.add_argument("--timeout", type=float, default=-1, help="Seconds to wait. Negative means forever.")
     p.add_argument("--interval", type=float, default=0.2)
+    p.add_argument("--cli-fallback", action="store_true", help="Allow typed TTY input as an explicit fallback.")
     p.set_defaults(func=cmd_wait)
 
     p = sub.add_parser("emit", help="Append an event to events.jsonl.")

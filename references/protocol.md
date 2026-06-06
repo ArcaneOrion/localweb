@@ -30,46 +30,50 @@ Required fields:
   "active_choice_id": null,
   "updated_at": "2026-06-05T12:00:00+00:00",
   "context": [{"label": "Task", "value": "Understand module flow"}],
-  "choices": [{"id": "A", "label": "Show architecture"}]
+  "choices": [{"id": "source_path", "label": "Show source path"}]
 }
 ```
 
 Rules:
 
 - `active_panel` must point to a file below `.localweb/panels/`.
-- `choices` are low-risk user choices only.
-- `active_choice_id` links browser clicks to `localweb wait --id`.
+- `choices` are optional, low-risk context inputs suggested by the CLI agent. They are not required for pure display panels.
+- Choice IDs are arbitrary safe strings, not fixed letters.
+- `active_choice_id` links browser input to `localweb wait --id`.
 
 ## 事件（Events）
 
 `events.jsonl` 是 agent 到 Web 的事件流和审计历史。每行都是一个 JSON 对象，至少包含 `type` 和 `ts` 字段。
 
-`inbox/events.jsonl` 是 Web 到 CLI 的事件流。选择事件格式：
+`inbox/events.jsonl` 是 Web 到 CLI 的低风险上下文输入流。MVP 的浏览器回传事件格式：
 
 ```json
 {
   "event_id": "uuid",
   "type": "choice",
   "choice_id": "next",
-  "value": "B",
+  "value": "source_path",
   "label": "显示源码路径",
   "session_id": "cli-main",
   "ts": "2026-06-05T12:00:00+00:00"
 }
 ```
 
-`wait` 命令消费第一个未消费的匹配事件，并在 `events.jsonl` 中记录 `choice_consumed` 事件。
+默认情况下，`wait` 命令只消费第一个未消费的匹配浏览器输入，并在 `events.jsonl` 中记录 `choice_consumed` 事件。纯展示 panel 不需要发布 `choices`，也不需要 `wait`。
 
-对于实时浏览器交互，先发布 choices，然后在结束 CLI 回合前运行 `localweb wait --id <choice_id>`。浏览器点击是持久化的 inbox 事件；它们不会自动出现在终端中，除非 CLI 命令去读取。
+对于需要回到 CLI 的浏览器交互，先发布上下文输入，再在结束 CLI 回合前运行 `localweb wait --id <choice_id>`。浏览器点击或输入是持久化的 inbox 事件；它们不会自动出现在终端中，除非 CLI 命令去读取。
+
+如果用户不想点选，可以显式运行 `localweb wait --id <choice_id> --cli-fallback`，允许交互式 TTY 中的文字输入作为兜底结果。该模式会记录 `cli_override`；管道 stdin 不会被默认当作选择。
 
 ## 事件类型
 
 ### Choice 生命周期
 
-- `choice_requested`：由 `choice` 命令发布，写入 `events.jsonl`
-- `choice`：用户在浏览器中点击，写入 `inbox/events.jsonl`
+- `choice_requested`：由 `choice` 命令发布建议型输入，写入 `events.jsonl`
+- `choice`：用户在浏览器中提供低风险上下文输入，写入 `inbox/events.jsonl`
 - `choice_consumed`：`wait` 读取事件，写入 `events.jsonl`
 - `choice_obsoleted`：新的 `choice` 命令使用相同 ID，作废旧的未消费事件，写入 `events.jsonl`
+- `cli_override`：显式启用 `--cli-fallback` 时，用户在交互式 CLI 输入文字，写入 `events.jsonl`
 
 ### 维护
 

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,38 +7,38 @@
   <link rel="stylesheet" href="/shell/theme.css">
 </head>
 <body>
-  <main class="deck" aria-label="HTML Companion">
+  <main class="deck" aria-label="LocalWeb 伴生界面">
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark">LW</span>
         <div>
-          <h1>LOCALWEB COMPANION</h1>
-          <span id="subtitle">HTML DECK</span>
+          <h1>LOCALWEB</h1>
+          <span id="subtitle">HTML 舞台</span>
         </div>
       </div>
       <dl class="status-strip">
-        <div><dt>STATUS</dt><dd id="status">BOOTING</dd></div>
-        <div><dt>SESSION</dt><dd id="session">...</dd></div>
-        <div><dt>PIPE</dt><dd id="pipe">READY</dd></div>
-        <div><dt>PANEL</dt><dd id="panel-name">...</dd></div>
+        <div><dt>状态</dt><dd id="status">启动中</dd></div>
+        <div><dt>会话</dt><dd id="session">...</dd></div>
+        <div><dt>通道</dt><dd id="pipe">就绪</dd></div>
+        <div><dt>面板</dt><dd id="panel-name">...</dd></div>
       </dl>
     </header>
 
-    <section class="body-grid">
-      <aside class="context-pane" aria-label="Context">
-        <div class="pane-title">CONTEXT STACK</div>
+    <section class="body-grid" id="body-grid">
+      <aside class="context-pane" id="context-pane" aria-label="上下文">
+        <div class="pane-title">CONTEXT 上下文</div>
         <ol id="context-list" class="context-list"></ol>
       </aside>
 
-      <section class="stage-wrap" aria-label="Live HTML stage">
+      <section class="stage-wrap" aria-label="HTML 舞台">
         <div class="stage-head">
-          <span>LIVE HTML STAGE</span>
-          <span id="updated-at">sync pending</span>
+          <span>HTML STAGE 舞台</span>
+          <span id="updated-at">等待同步</span>
         </div>
         <div class="stage-shell">
-          <iframe id="stage-frame" title="Agent generated HTML panel" sandbox="allow-scripts allow-forms allow-popups allow-downloads"></iframe>
+          <iframe id="stage-frame" title="Agent 生成的 HTML 面板" sandbox="allow-scripts allow-forms allow-popups allow-downloads"></iframe>
         </div>
-        <div id="choices" class="choices" aria-label="Choices"></div>
+        <div id="choices" class="choices is-empty" aria-label="上下文输入"></div>
       </section>
     </section>
   </main>
@@ -46,4 +46,3 @@
   <script src="/shell/app.js"></script>
 </body>
 </html>
-

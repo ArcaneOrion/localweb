@@ -1,13 +1,13 @@
 ---
 name: html-companion
-description: Start and drive a project-level local HTML companion interface for CLI agents. Use when a user wants agent output presented as visual, structured, interactive local HTML panels for learning, code understanding, planning, debugging, reviews, research summaries, or A/B/C/D lightweight choices while keeping the terminal CLI as the primary conversation and permission surface.
+description: Start and drive a project-level local HTML companion interface for CLI agents. Use when a user wants agent output presented as visual, structured, interactive local HTML panels for learning, code understanding, planning, debugging, reviews, research summaries, or optional low-risk context interactions while keeping the terminal CLI as the primary conversation, permission, and control surface.
 ---
 
 # HTML Companion
 
 Use HTML Companion to attach a local browser-based visual layer to the current CLI agent session.
 
-The terminal remains the control plane and source of conversation context. The browser is only a project-level visual projection plus a low-risk choice surface.
+The terminal remains the control plane and source of conversation context. The browser is only a project-level visual projection plus an optional low-risk context surface.
 
 ## Quick Start
 
@@ -59,26 +59,35 @@ uv run scripts/localweb.py status \
   --context "Stage=Module map"
 ```
 
-5. Offer lightweight choices when useful:
+5. Offer optional context interactions only when they reduce user friction. Pure display is valid and often preferable.
 
 ```bash
 uv run scripts/localweb.py choice \
   --id next \
-  --option A="Show architecture" \
-  --option B="Show source path" \
-  --option C="Make exercise" \
-  --option D="Return"
+  --option architecture="Show architecture" \
+  --option source_path="Show source path" \
+  --option exercise="Make exercise"
 ```
 
-6. Read the user's browser click only when the CLI flow needs it:
+Choices are model-suggested directions, not a required UI pattern. Rich panels may use tabs, filters, annotations, sliders, comparison cards, or forms when those help the user provide context that would be awkward in terminal prose.
+
+6. Read the user's browser input only when the CLI flow needs it:
 
 ```bash
 uv run scripts/localweb.py wait --id next
 ```
 
-`wait` prints only the selected value, such as `B`. Treat that printed value as the user response in the CLI context.
+`wait` prints only the selected value, such as `source_path`. Treat that printed value as a low-risk user context signal in the CLI flow.
 
-For a live choice, run `wait` immediately after publishing the choices and keep the CLI turn open while the user clicks. Do not end the turn expecting a browser click to appear in the terminal automatically; the click is stored in `.localweb/inbox/events.jsonl` until `wait` consumes it.
+If the user may prefer typing directly in the terminal instead of clicking, opt in explicitly:
+
+```bash
+uv run scripts/localweb.py wait --id next --cli-fallback
+```
+
+`--cli-fallback` only accepts interactive TTY input. Piped stdin is ignored by default so automation cannot accidentally become a user choice.
+
+For a live browser input, run `wait` immediately after publishing the context request and keep the CLI turn open while the user responds. Do not end the turn expecting browser input to appear in the terminal automatically; it is stored in `.localweb/inbox/events.jsonl` until `wait` consumes it.
 
 7. 定期清理已消费事件（可选）：
 
@@ -92,16 +101,16 @@ uv run scripts/localweb.py clean
 
 - **choice ID 可以重复使用**：创建新的 `choice --id foo` 时，会自动作废同 ID 的所有未消费事件。这防止 `wait` 读取到过期的点击。
 - **Inbox 增长**：inbox 会累积所有点击，直到被清理。定期运行 `clean` 来移除已消费的事件。
-- **事件类型**：`choice_consumed`（被 wait 读取）、`choice_obsoleted`（被新 choice 替换）、`inbox_cleaned`（维护操作）。
+- **事件类型**：`choice_consumed`（被 wait 读取）、`choice_obsoleted`（被新 choice 替换）、`cli_override`（显式 CLI 文字兜底）、`inbox_cleaned`（维护操作）。
 
 ## 规则
 
 - Keep all runtime artifacts under the target project's `.localweb/`.
 - Do not write runtime state into the skill installation directory.
 - Keep CLI as the only primary model context.
-- Do not use Web choices for dangerous permissions, command execution, file deletion, or network approval.
+- Do not use Web interactions for dangerous permissions, command execution, file deletion, or network approval.
 - Bind local servers to `127.0.0.1` unless the user explicitly asks otherwise.
-- Use the Web UI for visual comprehension: diagrams, comparisons, timelines, annotated diffs, learning panels, and small choice cards.
+- Use the Web UI for visual comprehension and context collection: diagrams, comparisons, timelines, annotated diffs, filters, rankings, small forms, and optional direction cards.
 - Do not depend on a specific panel style. The shell is replaceable; the protocol is the stable contract.
 
 ## References
