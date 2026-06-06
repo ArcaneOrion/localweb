@@ -1,41 +1,43 @@
-# Default Shell Visual Style
+# 默认 Shell 视觉风格
 
-The default shell is a yellow-black cartoon terminal deck. It is a replaceable skin over the stable file protocol.
+默认 shell 是“本地飞船控制台”风格：蓝灰科幻底、LocalWeb 高对比黄色、粗黑漫画描边。它只是稳定文件协议之上的可替换皮肤。
 
-## Direction
+## 方向
 
-- Hard black outlines.
-- Yellow as the primary attention color.
-- Dark brown/black terminal background.
-- Small radii, never soft pill-heavy UI.
-- Dense but legible terminal-like layout.
-- A top status rail, left context stack, central HTML stage, and optional interaction tray.
+- 保留硬朗黑色描边和卡通块面。
+- 黄色是主识别色和注意力颜色，保持强对比。
+- 背景使用更明亮的蓝灰/孔雀蓝，不回到大面积黑色。
+- 科幻感来自细网格、扫描线、状态灯和 HUD 小标签，不使用夸张光晕。
+- 小圆角，避免柔软 pill-heavy UI。
+- 中心 HTML stage 是主区域，左侧上下文和底部输入只做辅助。
 
-## Palette
+## 色板
 
 ```text
-Ink:    #050505
-Base:   #17140b
-Panel:  #241f10
+Line:   #07111b
+Base:   #31566e
+Deck:   #2e4f67
+Panel:  #2e4c66
+Rail:   #3a5d78
 Yellow: #ffd43b
-Cream:  #fff3bf
-Orange: #ff8f1f
-Cyan:   #24d7ff
+Cream:  #fff8d6
+Orange: #ffb454
+Cyan:   #35d8ff
 ```
 
-## Layout
+## 布局
 
 ```text
-compact top status bar
-narrow context stack | dominant central iframe stage
-optional interaction tray under the stage, hidden when inactive
+紧凑顶部状态栏
+窄上下文列 | 主导性的中心 iframe stage
+底部可选交互区，非活跃时隐藏或退后
 ```
 
-The central panel content is intentionally not constrained to this style. The shell frames the output; the agent-generated panel owns its own visual language. The interaction tray should disappear or recede when there is no active user input request.
+中心 panel 内容不被强制套用 shell 风格。shell 负责承载和框架，agent 生成的 panel 可以拥有自己的视觉语言，但默认应呼应蓝灰科幻底、黄色高亮和漫画描边。
 
-Layout defaults:
+布局默认值：
 
-- Keep the top rail near 56px on desktop.
-- Keep the context column narrow, roughly 160-220px, and hide it when no useful context exists.
-- Let the central stage take the remaining space; do not reserve empty space for inactive choices.
-- On mobile, show the stage before secondary context.
+- 桌面顶部状态栏约 52px。
+- 上下文列保持窄，约 130-176px；没有有效上下文时隐藏。
+- 中心 stage 占据剩余空间；不要为未激活的 choices 预留空白。
+- 移动端优先显示 stage，再显示辅助上下文。

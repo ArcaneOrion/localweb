@@ -1,16 +1,16 @@
 :root {
   color-scheme: dark;
-  --ink: #080806;
-  --bg: #17140b;
-  --panel: #241f10;
-  --panel-2: #32290f;
+  --ink: #22384d;
+  --bg: #2a435b;
+  --panel: #2e4c66;
+  --panel-2: #3a5d78;
   --yellow: #ffd43b;
   --yellow-2: #ffec80;
-  --orange: #ff8f1f;
-  --cyan: #24d7ff;
-  --cream: #fff3bf;
-  --line: #050505;
-  --muted: #c5b66a;
+  --orange: #ffb454;
+  --cyan: #35d8ff;
+  --cream: #fff8d6;
+  --line: #07111b;
+  --muted: #c9deea;
   --danger: #ff4d2e;
   --radius: 6px;
   --font-mono: "IBM Plex Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
@@ -26,11 +26,9 @@ body {
   min-height: 100%;
   overflow: hidden;
   background:
-    linear-gradient(90deg, rgba(255, 212, 59, .055) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(255, 212, 59, .04) 1px, transparent 1px),
-    radial-gradient(circle at 18% 12%, rgba(255, 143, 31, .18), transparent 34%),
-    #0d0c07;
-  background-size: 36px 36px, 36px 36px, 100% 100%, auto;
+    repeating-linear-gradient(90deg, rgba(255, 248, 214, .16) 0 1px, transparent 1px 76px),
+    repeating-linear-gradient(0deg, rgba(53, 216, 255, .12) 0 1px, transparent 1px 76px),
+    #31566e;
   color: var(--cream);
   font-family: var(--font-mono);
   letter-spacing: 0;
@@ -44,11 +42,11 @@ button {
   position: fixed;
   inset: clamp(6px, 1.2vw, 16px);
   display: grid;
-  grid-template-rows: 56px minmax(0, 1fr);
+  grid-template-rows: 52px minmax(0, 1fr);
   border: 3px solid var(--line);
   border-radius: var(--radius);
-  background: linear-gradient(135deg, var(--bg), #0f0e08 72%);
-  box-shadow: 8px 8px 0 var(--line);
+  background: #2e4f67;
+  box-shadow: 10px 10px 0 var(--line);
   overflow: hidden;
 }
 
@@ -93,11 +91,12 @@ button {
   width: 34px;
   height: 34px;
   border: 3px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 50%;
   background: var(--line);
   color: var(--yellow);
   font-family: var(--font-display);
   font-size: 16px;
+  transform: rotate(-6deg);
 }
 
 .brand h1 {
@@ -153,7 +152,7 @@ button {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(130px, 176px) minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -163,11 +162,11 @@ button {
 
 .context-pane {
   min-height: 0;
-  padding: 10px;
+  padding: 8px;
   border-right: 3px solid var(--line);
   background:
-    linear-gradient(135deg, rgba(255, 212, 59, .16), transparent 38%),
-    var(--panel);
+    repeating-linear-gradient(0deg, rgba(53, 216, 255, .14) 0 1px, transparent 1px 18px),
+    #2c4963;
   overflow: auto;
 }
 
@@ -254,15 +253,21 @@ button {
 .stage-wrap {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 7px;
   min-height: 0;
-  padding: 10px;
-  background: linear-gradient(135deg, #15130b, #2b230e);
+  padding: 8px;
+  background: #274159;
 }
 
 .stage-head {
   background: var(--panel-2);
   color: var(--cream);
+}
+
+.stage-head::before {
+  content: "◉";
+  color: var(--cyan);
+  margin-right: 6px;
 }
 
 .stage-head span:first-child {
@@ -276,10 +281,10 @@ button {
 
 .stage-shell {
   min-height: 0;
-  border: 3px solid var(--line);
+  border: 4px solid var(--line);
   border-radius: var(--radius);
-  background: var(--line);
-  box-shadow: 5px 5px 0 var(--line);
+  background: #12304a;
+  box-shadow: 7px 7px 0 var(--line);
   overflow: hidden;
   position: relative;
 }
@@ -290,7 +295,7 @@ button {
   min-height: 240px;
   border: 0;
   display: block;
-  background: #111;
+  background: #25435b;
   overflow: auto;
 }
 
@@ -369,7 +374,7 @@ button {
 .choice-btn .choice-id {
   display: grid;
   place-items: center;
-  background: var(--yellow);
+  background: var(--cyan);
   border-right: 2px solid var(--line);
   font-family: var(--font-display);
   font-size: clamp(10px, 1vw, 14px);

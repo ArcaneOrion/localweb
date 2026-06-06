@@ -173,15 +173,23 @@ def default_panel_html() -> str:
 <style>
   :root {
     color-scheme: dark;
-    --ink: #101008;
-    --panel: #211d10;
+    --ink: #29465d;
+    --panel: #31536d;
     --yellow: #ffd43b;
-    --cream: #fff3bf;
-    --cyan: #24d7ff;
-    --line: #050505;
+    --cream: #fff8d6;
+    --cyan: #35d8ff;
+    --line: #07111b;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; min-height: 100%; background: var(--ink); color: var(--cream); }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background:
+      repeating-linear-gradient(90deg, rgba(255, 248, 214, .14) 0 1px, transparent 1px 72px),
+      repeating-linear-gradient(0deg, rgba(53, 216, 255, .11) 0 1px, transparent 1px 72px),
+      var(--ink);
+    color: var(--cream);
+  }
   body {
     display: grid;
     place-items: center;
@@ -191,7 +199,7 @@ def default_panel_html() -> str:
   main {
     width: min(980px, 100%);
     border: 4px solid var(--line);
-    background: linear-gradient(135deg, #2f2812, #17140b 64%);
+    background: var(--panel);
     box-shadow: 10px 10px 0 var(--line);
     padding: clamp(24px, 5vw, 56px);
   }
@@ -214,8 +222,8 @@ def default_panel_html() -> str:
   }
   p { max-width: 68ch; font-size: clamp(16px, 2vw, 22px); line-height: 1.6; }
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 28px; }
-  .cell { border: 3px solid var(--line); background: #fff3bf; color: var(--line); padding: 14px; min-height: 88px; }
-  .cell strong { display: block; font-size: 24px; color: #000; }
+  .cell { border: 3px solid var(--line); background: #fff8d6; color: var(--line); padding: 14px; min-height: 88px; }
+  .cell strong { display: block; font-size: 24px; color: var(--line); }
   .cell span { display: block; margin-top: 8px; font-weight: 700; }
   @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
 </style>
