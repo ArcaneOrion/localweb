@@ -39,13 +39,13 @@ uv run scripts/localweb.py serve --port 8765
 
 | 命令 | 用途 |
 |------|------|
-| `init` | 初始化 .localweb 目录结构 |
+| `init` | 初始化 .localweb 目录结构；`--shell-only` 只刷新浏览器 shell |
 | `serve` | 启动 HTTP 服务器 |
 | `panel` | 注册 HTML panel |
 | `status` | 更新状态和上下文 |
 | `choice` | 发布可选的建议型选择或上下文输入 |
 | `wait` | 显式等待 Web 输入返回 CLI，可启用 CLI 文字兜底 |
-| `clean` | 清理已消费事件 |
+| `clean` | 清理已消费和已作废事件 |
 | `doctor` | 环境检查 |
 | `emit` | 追加自定义事件 |
 

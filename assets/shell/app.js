@@ -15,6 +15,7 @@
 
   let currentPanel = '';
   let lastChoiceKey = '';
+  let writeToken = '';
   const maxPanelInputChars = 20000;
 
   const statusLabels = {
@@ -55,6 +56,13 @@
       minute: '2-digit',
       second: '2-digit',
     }).format(date)}`;
+  }
+
+  function writeHeaders() {
+    return {
+      'content-type': 'application/json',
+      'x-localweb-token': writeToken,
+    };
   }
 
   function renderContext(items) {
@@ -104,7 +112,7 @@
         try {
           const res = await fetch('/api/choice', {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers: writeHeaders(),
             body: JSON.stringify({
               choice_id: state.active_choice_id,
               value: btn.dataset.choice,
@@ -155,7 +163,7 @@
     els.pipe.textContent = '发送中';
     const res = await fetch('/api/panel-input', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: writeHeaders(),
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await res.text());
@@ -176,6 +184,7 @@
   }
 
   function renderState(state) {
+    writeToken = String(state.write_token || '');
     els.subtitle.textContent = state.title || 'HTML 舞台';
     els.status.textContent = statusLabel(state.status);
     els.session.textContent = state.session_id || 'cli-main';

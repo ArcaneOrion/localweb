@@ -6,8 +6,10 @@
 # ///
 import argparse
 import asyncio
+import fcntl
 import json
 import re
+import secrets
 import shutil
 import socket
 import sys
@@ -95,10 +97,35 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def write_jsonl_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".{uuid.uuid4().hex}.tmp")
+    tmp.write_text(
+        "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    tmp.replace(path)
+
+
+def lock_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".lock")
+
+
+def with_jsonl_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock = lock_path(path).open("w", encoding="utf-8")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    return lock
+
+
 def append_jsonl(path: Path, obj: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
+    with with_jsonl_lock(path) as lock:
+        try:
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -121,6 +148,7 @@ def default_state() -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "session_id": DEFAULT_SESSION,
+        "write_token": secrets.token_urlsafe(32),
         "title": "LocalWeb",
         "status": DEFAULT_STATE,
         "active_panel": "panels/main.html",
@@ -228,10 +256,70 @@ def copy_file(src: Path, dst: Path, force: bool) -> bool:
     return True
 
 
-def init_project(project: Path, force: bool = False) -> dict[str, Any]:
+def shell_supports_write_token(project: Path) -> bool:
+    app_js = shell_dir(project) / "app.js"
+    if not app_js.exists():
+        return False
+    try:
+        content = app_js.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "x-localweb-token" in content and "write_token" in content
+
+
+def require_current_shell(project: Path) -> None:
+    if shell_supports_write_token(project):
+        return
+    raise SystemExit(
+        "LocalWeb shell assets are missing write-token support. "
+        f"Run: uv run scripts/localweb.py init --project {project} --shell-only"
+    )
+
+
+def copy_shell_assets(project: Path, force: bool) -> tuple[list[str], list[str]]:
+    created: list[str] = []
+    preserved: list[str] = []
+    src_shell = shell_source_dir()
+    if not src_shell.exists():
+        raise SystemExit(f"Missing shell assets: {src_shell}")
+    for src in src_shell.iterdir():
+        if src.is_file():
+            dst = shell_dir(project) / src.name
+            if copy_file(src, dst, force):
+                created.append(str(dst))
+            else:
+                preserved.append(str(dst))
+    return created, preserved
+
+
+def init_project(project: Path, force: bool = False, shell_only: bool = False) -> dict[str, Any]:
+    if shell_only:
+        require_initialized(project)
+
     ensure_layout(project)
     created: list[str] = []
     preserved: list[str] = []
+
+    if shell_only:
+        shell_created, shell_preserved = copy_shell_assets(project, force=True)
+        created.extend(shell_created)
+        preserved.extend(shell_preserved)
+        append_jsonl(
+            events_path(project),
+            {
+                "type": "shell_refreshed",
+                "project_root": str(project),
+                "ts": now_iso(),
+            },
+        )
+        return {
+            "status": "ok",
+            "project_root": str(project),
+            "localweb_dir": str(localweb_dir(project)),
+            "created": created,
+            "preserved": preserved,
+            "next_command": f"uv run scripts/localweb.py serve --project {project} --port 8765",
+        }
 
     defaults: list[tuple[Path, str]] = [
         (state_path(project), json.dumps(default_state(), ensure_ascii=False, indent=2) + "\n"),
@@ -246,16 +334,9 @@ def init_project(project: Path, force: bool = False) -> dict[str, Any]:
         path.write_text(content, encoding="utf-8")
         created.append(str(path))
 
-    src_shell = shell_source_dir()
-    if not src_shell.exists():
-        raise SystemExit(f"Missing shell assets: {src_shell}")
-    for src in src_shell.iterdir():
-        if src.is_file():
-            dst = shell_dir(project) / src.name
-            if copy_file(src, dst, force):
-                created.append(str(dst))
-            else:
-                preserved.append(str(dst))
+    shell_created, shell_preserved = copy_shell_assets(project, force)
+    created.extend(shell_created)
+    preserved.extend(shell_preserved)
 
     append_jsonl(
         events_path(project),
@@ -284,6 +365,9 @@ def load_state(project: Path) -> dict[str, Any]:
     state = read_json(state_path(project), default_state())
     if state.get("schema_version") != SCHEMA_VERSION:
         state["schema_version"] = SCHEMA_VERSION
+    if not state.get("write_token"):
+        state["write_token"] = secrets.token_urlsafe(32)
+        write_json(state_path(project), state)
     return state
 
 
@@ -339,7 +423,7 @@ def print_json(obj: dict[str, Any]) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    print_json(init_project(resolve_project(args.project), force=args.force))
+    print_json(init_project(resolve_project(args.project), force=args.force, shell_only=args.shell_only))
 
 
 def cmd_panel(args: argparse.Namespace) -> None:
@@ -622,20 +706,22 @@ def cmd_clean(args: argparse.Namespace) -> None:
     consumed = consumed_event_ids(project)
     inbox = inbox_path(project)
 
-    # 读取所有未消费的事件
-    unconsumed_events = []
-    removed_count = 0
-    for event in read_jsonl(inbox):
-        event_id = str(event.get("event_id", ""))
-        if event_id and event_id in consumed:
-            removed_count += 1
-        else:
-            unconsumed_events.append(event)
+    with with_jsonl_lock(inbox) as lock:
+        try:
+            # 读取所有未消费的事件
+            unconsumed_events = []
+            removed_count = 0
+            for event in read_jsonl(inbox):
+                event_id = str(event.get("event_id", ""))
+                if event_id and event_id in consumed:
+                    removed_count += 1
+                else:
+                    unconsumed_events.append(event)
 
-    # 重写 inbox，只保留未消费的
-    inbox.write_text("", encoding="utf-8")
-    for event in unconsumed_events:
-        append_jsonl(inbox, event)
+            # 原子替换 inbox，只保留未消费的事件
+            write_jsonl_atomic(inbox, unconsumed_events)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
     # 记录清理事件
     append_jsonl(
@@ -674,6 +760,13 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     writable = project.exists() and project.is_dir() and os_access_write(project)
     checks.append({"name": "project-writable", "status": "ok" if writable else "error", "value": str(project)})
     checks.append({"name": "localweb-initialized", "status": "ok" if state_path(project).exists() else "missing", "value": str(localweb_dir(project))})
+    if state_path(project).exists():
+        checks.append({
+            "name": "shell-write-token",
+            "status": "ok" if shell_supports_write_token(project) else "error",
+            "value": str(shell_dir(project) / "app.js"),
+            "hint": f"uv run scripts/localweb.py init --project {project} --shell-only",
+        })
 
     status = "ok" if all(c["status"] in {"ok", "missing"} for c in checks) else "error"
     print_json({"status": status, "project_root": str(project), "checks": checks})
@@ -732,6 +825,12 @@ def create_app(project: Path):
             raise HTTPException(status_code=400, detail="JSON body must be an object")
         return body
 
+    def require_write_token(request: Request, state: dict[str, Any]) -> None:
+        expected = str(state.get("write_token") or "")
+        received = request.headers.get("x-localweb-token", "")
+        if not expected or not received or not secrets.compare_digest(received, expected):
+            raise HTTPException(status_code=403, detail="invalid LocalWeb write token")
+
     def file_response(root: Path, rel_path: str) -> FileResponse:
         try:
             target = ensure_inside(root, root / rel_path)
@@ -773,10 +872,21 @@ def create_app(project: Path):
     async def api_choice(request: Request) -> JSONResponse:
         body = await request_json_object(request)
         state = load_state(project)
-        choice_id = body.get("choice_id") or state.get("active_choice_id")
-        value = body.get("value")
+        require_write_token(request, state)
+        active_choice_id = str(state.get("active_choice_id") or "").strip()
+        choice_id = str(body.get("choice_id") or active_choice_id).strip()
+        value = str(body.get("value") or "").strip()
         if not choice_id or not value:
             raise HTTPException(status_code=400, detail="choice_id and value are required")
+        if not active_choice_id or choice_id != active_choice_id:
+            raise HTTPException(status_code=409, detail="choice_id is not active")
+        allowed_choices = {
+            str(choice.get("id") or choice.get("value") or "").strip()
+            for choice in state.get("choices", [])
+            if isinstance(choice, dict)
+        }
+        if value not in allowed_choices:
+            raise HTTPException(status_code=400, detail="value is not an active choice")
         label = body.get("label") or value
         event = {
             "event_id": uuid.uuid4().hex,
@@ -795,6 +905,7 @@ def create_app(project: Path):
     async def api_panel_input(request: Request) -> JSONResponse:
         body = await request_json_object(request)
         state = load_state(project)
+        require_write_token(request, state)
         input_id = str(body.get("input_id") or body.get("id") or "").strip()
         text = body.get("text")
         if not input_id or not re.fullmatch(r"[a-zA-Z0-9_-]+", input_id):
@@ -849,6 +960,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
             init_project(project)
         else:
             raise SystemExit(f"{localweb_dir(project)} is not initialized. Run init or pass --init.")
+    require_current_shell(project)
 
     host = args.host
     if host != "127.0.0.1" and not args.allow_remote:
@@ -884,6 +996,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("init", help="Initialize project-level .localweb directory.")
     add_project(p)
     p.add_argument("--force", action="store_true", help="Overwrite default files and shell assets.")
+    p.add_argument("--shell-only", action="store_true", help="Refresh shell assets without touching state, inbox, or panels.")
     p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("doctor", help="Check runtime health.")
@@ -940,7 +1053,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--data", help="Extra JSON object merged into the event.")
     p.set_defaults(func=cmd_emit)
 
-    p = sub.add_parser("clean", help="Clean consumed events from inbox.")
+    p = sub.add_parser("clean", help="Clean consumed and obsoleted events from inbox.")
     add_project(p)
     p.set_defaults(func=cmd_clean)
 

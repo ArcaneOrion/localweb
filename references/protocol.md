@@ -24,6 +24,7 @@ LocalWeb 协议是项目级协议。运行时文件放在目标项目的 `.local
 {
   "schema_version": 1,
   "session_id": "cli-main",
+  "write_token": "local-random-token",
   "title": "LocalWeb",
   "status": "idle",
   "active_panel": "panels/main.html",
@@ -40,6 +41,13 @@ LocalWeb 协议是项目级协议。运行时文件放在目标项目的 `.local
 - `choices` 是 CLI agent 建议的可选低风险上下文输入；纯展示 panel 不需要 choices。
 - choice ID 是任意安全字符串，不是固定字母。
 - `active_choice_id` 用来把浏览器输入关联到 `localweb wait --id`。
+- `write_token` 是项目级本地写入令牌，由 shell 对 `/api/choice` 和 `/api/panel-input` 发送 `X-LocalWeb-Token` 时使用；不要把它用于权限确认或远程访问。
+
+## 写入边界
+
+LocalWeb 默认只绑定 `127.0.0.1`，写接口还要求 `X-LocalWeb-Token`。这可以阻止普通外部网页直接向本机 LocalWeb 注入 choice 或 panel input。
+
+`/api/choice` 只接受当前 `active_choice_id`，且 `value` 必须属于当前 `state.choices`。panel input 不强制结构化内容；服务端只校验合法 `input_id` 和非空文本，显式提交按钮属于 panel 编写约束。
 
 ## 事件（Events）
 
@@ -97,6 +105,7 @@ uv run scripts/localweb.py wait --id review-context --type panel
 
 - `choice_requested`：由 `choice` 命令发布建议型输入，写入 `events.jsonl`
 - `choice`：用户在浏览器中提供低风险上下文输入，写入 `inbox/events.jsonl`
+- `choice_received`：server 收到 choice，写入 `events.jsonl`
 - `choice_consumed`：`wait` 读取事件，写入 `events.jsonl`
 - `choice_obsoleted`：新的 `choice` 命令使用相同 ID，作废旧的未消费事件，写入 `events.jsonl`
 - `cli_override`：显式启用 `--cli-fallback` 时，用户在交互式 CLI 输入文字，写入 `events.jsonl`
@@ -116,10 +125,10 @@ uv run scripts/localweb.py wait --id review-context --type panel
 
 创建新的 `choice --id foo` 会自动作废 inbox 中所有未消费的、相同 `choice_id` 的事件。这防止在多轮交互中重用 ID 时，`wait` 读取到过期的点击。
 
-`wait` 命令会跳过在 `events.jsonl` 中标记为 `choice_consumed` 或 `choice_obsoleted` 的事件。
+`wait` 命令会跳过在 `events.jsonl` 中标记为 `choice_consumed`、`choice_obsoleted`、`panel_input_consumed` 或 `panel_input_obsoleted` 的事件。LocalWeb 假设同一个输入 ID 同时只有一个 CLI consumer 在等待；并发运行多个同 ID 的 `wait` 不属于推荐用法。
 
 同一个 `input_id` 收到新的 `panel_input` 时，旧的未消费 panel 输入会被标记为 `panel_input_obsoleted`，避免 CLI 读到用户后来已经替换掉的 Markdown 草稿。
 
 ## Inbox 维护
 
-inbox 会累积所有浏览器点击，直到显式清理。定期运行 `localweb clean` 来移除已消费和已作废的事件。这个操作随时都是安全的，不会影响未消费的事件。
+inbox 会累积所有浏览器点击和 panel 输入，直到显式清理。定期运行 `localweb clean` 来移除已消费和已作废的事件。`clean` 会用文件锁和原子替换重写 inbox，不会移除未消费事件。

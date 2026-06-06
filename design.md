@@ -124,9 +124,11 @@ skill 本体：
 {
   "schema_version": 1,
   "session_id": "codex-main",
+  "write_token": "local-random-token",
   "title": "React Fiber 学习图解",
   "status": "waiting_for_user",
   "active_panel": "panels/main.html",
+  "active_choice_id": "next",
   "updated_at": "2026-06-05T17:40:00+08:00",
   "context": [
     {"label": "当前任务", "value": "理解 React Fiber"},
@@ -155,6 +157,8 @@ skill 本体：
 ### inbox/events.jsonl
 
 `inbox/events.jsonl` 是 Web 到 CLI 的低风险上下文输入管道。
+
+浏览器 shell 从 `state.json` 读取 `write_token`，提交 choice 或 panel input 时发送 `X-LocalWeb-Token`。这个令牌只用于本地写入边界，避免普通外部网页直接向 localhost 服务注入输入；权限确认仍然必须留在 CLI。
 
 Web 提供上下文输入后写入：
 
@@ -186,12 +190,13 @@ uv run scripts/localweb.py wait --id review-context --type panel
 
 | 命令 | 作用 |
 |---|---|
-| `init` | 初始化 `.localweb/` 目录、默认 state 和默认 shell 资源 |
+| `init` | 初始化 `.localweb/` 目录、默认 state 和默认 shell 资源；`--shell-only` 只刷新 shell |
 | `serve` | 启动本地 Web 服务，默认监听 `127.0.0.1` |
 | `panel` | 写入或注册一个 HTML panel |
 | `status` | 更新 `state.json` 的状态、标题、上下文 |
 | `choice` | 发布可选的建议型选择或上下文输入 |
 | `wait` | 阻塞等待 Web 输入，返回 choice 短值或 panel Markdown |
+| `clean` | 清理 inbox 中已消费和已作废的事件 |
 | `emit` | 追加事件到 `events.jsonl` |
 | `doctor` | 检查 Python、端口、目录权限和依赖 |
 
@@ -224,6 +229,8 @@ uv run scripts/localweb.py wait --id review-context --type panel
    - app.js
    - theme.css
 
+`init --shell-only` 只刷新 `.localweb/shell/`。它用于升级旧项目的浏览器壳，不重写 `state.json`、inbox 或已有 panel。
+
 5. 不覆盖用户已有 panel：
    - 已存在文件默认保留
    - 需要重置时使用 --force
@@ -248,6 +255,8 @@ uv run scripts/localweb.py wait --id review-context --type panel
 ### serve 设计
 
 `serve` 也是项目级命令。它从项目的 `.localweb/` 读取协议文件，并把 `.localweb/panels` 中的 HTML 放入 shell 舞台。
+
+启动前需要检查项目内 shell 是否支持 `X-LocalWeb-Token`。如果旧 shell 不支持，应提示运行 `init --shell-only`，而不是放宽写接口。
 
 建议行为：
 

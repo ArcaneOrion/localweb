@@ -27,6 +27,14 @@ uv run scripts/localweb.py serve --project /path/to/project --port 8765
 
 `serve` 启动后，把输出的 `url` 告诉用户。
 
+如果旧项目启动时报 shell 缺少写入令牌支持，运行：
+
+```bash
+uv run scripts/localweb.py init --project /path/to/project --shell-only
+```
+
+这只刷新 `.localweb/shell/`，不改 `state.json`、inbox 或 panel。
+
 ## 标准流程
 
 1. 初始化项目级运行目录：
@@ -61,7 +69,7 @@ uv run scripts/localweb.py status \
 
 5. 只有在能降低用户表达成本时，才提供可选上下文输入。纯展示是有效且常见的路径。
 
-优先把主要交互放在 HTML panel 内部，例如标注、筛选、滑块、小表单、圈选区域或 Markdown 文本框。panel 需要把结果返回 CLI 时，必须由用户显式点击发送按钮，并通过 `postMessage` 发出 Markdown 文本：
+优先把主要交互放在 HTML panel 内部，例如标注、筛选、滑块、小表单、圈选区域或 Markdown 文本框。panel 需要把结果返回 CLI 时，应设计成由用户显式点击发送按钮，再通过 `postMessage` 发出 Markdown 文本：
 
 ```js
 window.parent.postMessage({
@@ -110,7 +118,7 @@ uv run scripts/localweb.py wait --id next --cli-fallback
 
 实时浏览器输入场景中，发布上下文请求后立即运行 `wait`，并保持 CLI 回合打开直到用户响应。浏览器输入会存入 `.localweb/inbox/events.jsonl`，只有 `wait` 消费后才进入 CLI 上下文。
 
-7. 定期清理已消费事件（可选）：
+7. 定期清理已消费和已作废事件（可选）：
 
 ```bash
 uv run scripts/localweb.py clean
@@ -120,9 +128,10 @@ uv run scripts/localweb.py clean
 
 ## 关键行为
 
+- **写接口有本地令牌**：shell 从 `state.json` 读取 `write_token`，并在提交 choice 或 panel input 时发送 `X-LocalWeb-Token`。这是本地写入边界，不是权限确认机制。
 - **choice ID 可以重复使用**：创建新的 `choice --id foo` 时，会自动作废同 ID 的所有未消费事件，防止 `wait` 读到过期点击。
 - **Inbox 会累积**：浏览器输入会留在 inbox，直到被消费或清理。定期运行 `clean`。
-- **事件类型**：`choice_consumed`（choice 被 wait 读取）、`panel_input_consumed`（panel Markdown 被 wait 读取）、`choice_obsoleted` / `panel_input_obsoleted`（同 ID 旧事件被替换）、`cli_override`（显式 CLI 文字兜底）、`inbox_cleaned`（维护操作）。
+- **事件类型**：`choice_received` / `panel_input_received`（server 收到浏览器输入）、`choice_consumed` / `panel_input_consumed`（输入被 wait 读取）、`choice_obsoleted` / `panel_input_obsoleted`（同 ID 旧事件被替换）、`cli_override`（显式 CLI 文字兜底）、`inbox_cleaned`（维护操作）。
 
 ## 规则
 
