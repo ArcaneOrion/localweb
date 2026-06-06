@@ -57,17 +57,43 @@ uv run scripts/localweb.py serve --port 8765
 uv run scripts/localweb.py panel --id main --file explanation.html --title "功能解释"
 ```
 
+如果这个 panel 会通过 `postMessage` 返回输入，注册或切状态时必须同时声明 `--wait-id`，让命令输出精确的 `next_command`：
+
+```bash
+uv run scripts/localweb.py panel \
+  --id review \
+  --file review.html \
+  --title "补充审查上下文" \
+  --wait-id review-context \
+  --wait-type panel
+```
+
 4. 更新可见状态和左侧上下文：
 
 ```bash
 uv run scripts/localweb.py status \
-  --state waiting_for_user \
-  --title "选择下一步视角" \
+  --state working \
+  --title "认证流程图解" \
   --context "任务=理解认证流程" \
   --context "阶段=模块地图"
 ```
 
-5. 只有在能降低用户表达成本时，才提供可选上下文输入。纯展示是有效且常见的路径。
+如果这次状态更新是在请求浏览器输入，必须带上 `--wait-id`：
+
+```bash
+uv run scripts/localweb.py status \
+  --state waiting_for_user \
+  --title "补充审查上下文" \
+  --wait-id review-context \
+  --wait-type panel
+```
+
+5. 判断这次 Web 更新是否需要回到 CLI：
+
+- **纯展示 panel**：只用于解释、图解或局部浏览器内交互，不需要用户结果回到模型上下文。此时不要发布 `choice`，也不要运行 `wait`。
+- **浏览器输入闭环**：只要发布了会写入 inbox 的交互，无论是 panel 内的 `panel_input`，还是底部 `choices`，都必须在发布后立刻运行对应 `wait`，保持 CLI 回合打开直到输入被消费。不要把“稍后再等”留给模型记忆。
+
+6. 只有在能降低用户表达成本时，才提供可选上下文输入。纯展示是有效且常见的路径。
 
 优先把主要交互放在 HTML panel 内部，例如标注、筛选、滑块、小表单、圈选区域或 Markdown 文本框。panel 需要把结果返回 CLI 时，应设计成由用户显式点击发送按钮，再通过 `postMessage` 发出 Markdown 文本：
 
@@ -80,7 +106,7 @@ window.parent.postMessage({
 }, "*");
 ```
 
-CLI agent 需要等待这类 panel 输入时，运行：
+发布这种 panel、切到等待状态后，CLI agent 必须立刻执行命令输出里的 `next_command`。对应命令形如：
 
 ```bash
 uv run scripts/localweb.py wait --id review-context --type panel
@@ -88,7 +114,7 @@ uv run scripts/localweb.py wait --id review-context --type panel
 
 `wait --type panel` 只输出 Markdown 原文。把它当作用户通过 Web 面板补充的低风险上下文，而不是权限确认。
 
-6. 底部 `choices` 是辅助通道，适合少量方向建议或兜底选择，不是固定主交互模式。
+7. 底部 `choices` 是辅助通道，适合少量方向建议或兜底选择，不是固定主交互模式。
 
 ```bash
 uv run scripts/localweb.py choice \
@@ -100,13 +126,15 @@ uv run scripts/localweb.py choice \
 
 这些选项是模型建议的方向，不是固定 UI 模式。HTML panel 也可以使用 tab、筛选器、标注、滑块、对比卡片或表单，帮助用户表达终端文字里难以描述的上下文。
 
-只有 CLI 流程需要用户输入结果时，才读取浏览器输入：
+如果发布了 `choice`，必须紧跟 `wait`，不要结束 CLI 回合后再等待：
 
 ```bash
 uv run scripts/localweb.py wait --id next
 ```
 
 `wait` 只输出被选择的值，例如 `source_path`。把这个值当作低风险用户上下文信号，而不是权限确认。
+
+`choice` 成功发布后会输出 `status: "waiting_for_user"`、`wait_required: true` 和 `next_command`。模型必须把这个 JSON 当作控制流提示，而不是普通完成态。
 
 如果用户更想直接在终端输入文字，可以显式启用 CLI 兜底：
 
@@ -116,9 +144,9 @@ uv run scripts/localweb.py wait --id next --cli-fallback
 
 `--cli-fallback` 只接受交互式 TTY 输入。默认不会把管道 stdin 当成用户选择，避免自动化流程误读。
 
-实时浏览器输入场景中，发布上下文请求后立即运行 `wait`，并保持 CLI 回合打开直到用户响应。浏览器输入会存入 `.localweb/inbox/events.jsonl`，只有 `wait` 消费后才进入 CLI 上下文。
+实时浏览器输入场景中，`panel/status/choice` 的可见更新不是闭环终点，`wait` 才是输入闸门。浏览器输入会存入 `.localweb/inbox/events.jsonl`，只有 `wait` 消费后才进入 CLI 上下文。
 
-7. 定期清理已消费和已作废事件（可选）：
+8. 定期清理已消费和已作废事件（可选）：
 
 ```bash
 uv run scripts/localweb.py clean
@@ -130,6 +158,7 @@ uv run scripts/localweb.py clean
 
 - **写接口有本地令牌**：shell 从 `state.json` 读取 `write_token`，并在提交 choice 或 panel input 时发送 `X-LocalWeb-Token`。这是本地写入边界，不是权限确认机制。
 - **choice ID 可以重复使用**：创建新的 `choice --id foo` 时，会自动作废同 ID 的所有未消费事件，防止 `wait` 读到过期点击。
+- **等待态输出 next_command**：`choice` 会自动输出下一条 `wait` 命令；`panel` 和 `status` 在传入 `--wait-id` 时也会输出 `next_command`。
 - **Inbox 会累积**：浏览器输入会留在 inbox，直到被消费或清理。定期运行 `clean`。
 - **事件类型**：`choice_received` / `panel_input_received`（server 收到浏览器输入）、`choice_consumed` / `panel_input_consumed`（输入被 wait 读取）、`choice_obsoleted` / `panel_input_obsoleted`（同 ID 旧事件被替换）、`cli_override`（显式 CLI 文字兜底）、`inbox_cleaned`（维护操作）。
 
@@ -138,6 +167,7 @@ uv run scripts/localweb.py clean
 - 所有运行时产物必须写在目标项目的 `.localweb/` 下。
 - 不要把运行时状态写进 skill 安装目录。
 - CLI 是唯一主模型上下文。
+- 发布任何可回传浏览器输入后，必须立刻运行对应 `wait` 并保持本轮 CLI 打开；否则用户在浏览器里说的话只会留在 inbox，不会进入模型上下文。
 - Web 交互不能用于危险权限、命令执行、文件删除或网络授权。
 - 除非用户明确要求，否则服务只绑定 `127.0.0.1`。
 - Web UI 用于可视化理解和上下文收集：图解、对比、时间线、带注释 diff、筛选、排序、小表单和可选方向卡。

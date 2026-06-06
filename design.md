@@ -180,9 +180,10 @@ uv run scripts/localweb.py init
 uv run scripts/localweb.py serve --port 8765
 uv run scripts/localweb.py serve --project /path/to/project --port 8765
 uv run scripts/localweb.py panel --id main --file output.html
-uv run scripts/localweb.py status --title "学习图解" --state waiting_for_user
+uv run scripts/localweb.py status --title "学习图解" --state working
 uv run scripts/localweb.py choice --id next --option architecture="看架构" --option example="看示例"
 uv run scripts/localweb.py wait --id next
+uv run scripts/localweb.py status --state waiting_for_user --wait-id review-context --wait-type panel
 uv run scripts/localweb.py wait --id review-context --type panel
 ```
 
@@ -511,10 +512,19 @@ agent：
   2. 生成 panels/main.html
   3. 更新 state.json
   4. 根据需要提供下一步方向卡；如果只是讲解，可省略
+  5. 如果提供了方向卡，立刻运行 localweb wait --id next，保持 CLI 回合打开
 用户在 Web 点“看源码路径”
-agent 运行 localweb wait --id next
 CLI 返回 source_path
 agent 继续讲源码路径
+```
+
+命令级护栏：
+
+```text
+choice 发布后 stdout 不再只表达 command ok，而是输出：
+status=waiting_for_user
+wait_required=true
+next_command="uv run scripts/localweb.py wait --id next"
 ```
 
 ### 代码理解
@@ -615,6 +625,7 @@ CLI 接收到方案 ID 后生成更细计划
 - agent 生成的 HTML 质量不稳定。
 - iframe 中 HTML 可能脚本过重或布局溢出。
 - Web 输入如果没有显式 wait，用户可能以为已经进入 CLI 上下文。
+- 如果发布 panel/status/choice 后没有立刻挂 wait，浏览器输入会落在 inbox 里，但当前模型回合不会继续。
 - 文件协议若过早复杂化，会拖慢 MVP。
 
 ### 缓解
@@ -622,6 +633,8 @@ CLI 接收到方案 ID 后生成更细计划
 - 保持 panel self-contained。
 - shell 只加载 `.localweb/panels` 下的文件。
 - 顶部明确显示通道状态：`就绪 / 等待输入 / 已发送`。
+- 把“发布可回传输入后立刻 wait”写入 agent workflow；纯展示 panel 才允许不 wait。
+- 在 `choice` 以及声明了 `--wait-id` 的 `panel/status` 输出中提供结构化 `next_command`，把提醒放到模型刚执行命令后的上下文里。
 - `wait` 返回后在 `events.jsonl` 记录 consumed 状态。
 - 第一版只支持低风险上下文输入事件，不支持任意命令执行。
 

@@ -82,11 +82,12 @@ uv run scripts/localweb.py choice --id next \
   --option source_path="看源码路径" \
   --option exercise="做练习"
 
-# 4. 只有 agent 需要继续推理时才等待输入
+# 4. 发布可回传输入后必须立刻 wait，保持 CLI 回合打开
 uv run scripts/localweb.py wait --id next
 # 输出: source_path
 
-# panel 内嵌交互也可以显式发送 Markdown；CLI 等待时指定 --type panel
+# panel 内嵌交互显式发送 Markdown 时，发布 panel 时声明 wait id
+uv run scripts/localweb.py panel --id review --file review.html --wait-id review-context --wait-type panel
 uv run scripts/localweb.py wait --id review-context --type panel
 # 输出: ## 用户补充 ...
 
@@ -99,7 +100,7 @@ uv run scripts/localweb.py wait --id next --cli-fallback
 - **CLI 为主上下文** - 终端是唯一的会话和权限控制面
 - **Web 为投影层** - 浏览器做可视化和低风险上下文输入，不处理权限
 - **文件协议解耦** - CLI/Server/Browser 通过文件通信
-- **显式控制流** - agent 显式调用 `wait`，无隐形输入
+- **显式控制流** - 发布可回传 Web 输入后，命令输出 `next_command` 指向对应 `wait`
 
 ## 📚 文档
 

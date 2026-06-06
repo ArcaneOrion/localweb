@@ -10,6 +10,7 @@ import fcntl
 import json
 import re
 import secrets
+import shlex
 import shutil
 import socket
 import sys
@@ -430,6 +431,43 @@ def print_json(obj: dict[str, Any]) -> None:
     print(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
+def wait_next_command(project: Path, include_project: bool, wait_id: str, wait_type: str) -> str:
+    command = ["uv", "run", "scripts/localweb.py", "wait"]
+    if include_project:
+        command.extend(["--project", str(project)])
+    command.extend(["--id", wait_id])
+    if wait_type != "choice":
+        command.extend(["--type", wait_type])
+    return shlex.join(command)
+
+
+def wait_response_fields(project: Path, include_project: bool, wait_id: str, wait_type: str) -> dict[str, Any]:
+    return {
+        "command_status": "ok",
+        "state_status": "waiting_for_user",
+        "wait_required": True,
+        "wait": {
+            "id": wait_id,
+            "type": wait_type,
+        },
+        "next_command": wait_next_command(project, include_project, wait_id, wait_type),
+    }
+
+
+def wait_hint_fields() -> dict[str, Any]:
+    return {
+        "command_status": "ok",
+        "state_status": "waiting_for_user",
+        "wait_required": True,
+        "wait": {
+            "id": None,
+            "type": None,
+        },
+        "next_command": None,
+        "hint": "Run localweb wait with the matching input id, or pass --wait-id to this command.",
+    }
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     print_json(init_project(resolve_project(args.project), force=args.force, shell_only=args.shell_only))
 
@@ -452,8 +490,17 @@ def cmd_panel(args: argparse.Namespace) -> None:
     context = parse_context(args.context)
     if context is not None:
         state["context"] = context
+    if args.wait_id:
+        state["status"] = "waiting_for_user"
     save_state(project, state, event_type="panel_updated")
-    print_json({"status": "ok", "panel": f"panels/{panel_id}.html", "path": str(dst)})
+    output: dict[str, Any] = {
+        "status": state["status"] if args.wait_id else "ok",
+        "panel": f"panels/{panel_id}.html",
+        "path": str(dst),
+    }
+    if args.wait_id:
+        output.update(wait_response_fields(project, args.project is not None, args.wait_id, args.wait_type))
+    print_json(output)
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -461,8 +508,12 @@ def cmd_status(args: argparse.Namespace) -> None:
     if not state_path(project).exists():
         init_project(project)
     state = load_state(project)
+    if args.wait_id and args.state not in (None, "waiting_for_user"):
+        raise SystemExit("--wait-id requires --state waiting_for_user or no --state")
     if args.state is not None:
         state["status"] = args.state
+    if args.wait_id:
+        state["status"] = "waiting_for_user"
     if args.title is not None:
         state["title"] = args.title
     if args.session_id is not None:
@@ -473,7 +524,13 @@ def cmd_status(args: argparse.Namespace) -> None:
     if context is not None:
         state["context"] = context
     save_state(project, state)
-    print_json({"status": "ok", "state": state})
+    is_waiting = state.get("status") == "waiting_for_user"
+    output: dict[str, Any] = {"status": "waiting_for_user" if is_waiting else "ok", "state": state}
+    if args.wait_id:
+        output.update(wait_response_fields(project, args.project is not None, args.wait_id, args.wait_type))
+    elif state.get("status") == "waiting_for_user":
+        output.update(wait_hint_fields())
+    print_json(output)
 
 
 def cmd_choice(args: argparse.Namespace) -> None:
@@ -492,7 +549,13 @@ def cmd_choice(args: argparse.Namespace) -> None:
     if args.title:
         state["title"] = args.title
     save_state(project, state, event_type="choice_requested")
-    print_json({"status": "ok", "choice_id": args.id, "choices": choices})
+    output: dict[str, Any] = {
+        "status": "waiting_for_user",
+        "choice_id": args.id,
+        "choices": choices,
+    }
+    output.update(wait_response_fields(project, args.project is not None, args.id, "choice"))
+    print_json(output)
 
 
 def consumed_event_ids(project: Path) -> set[str]:
@@ -1027,6 +1090,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title")
     p.add_argument("--context", action="append", help="Context item as Label=Value. Repeatable.")
     p.add_argument("--activate", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--wait-id", help="Declare that this panel expects browser input and emit the matching wait command.")
+    p.add_argument("--wait-type", choices=("choice", "panel", "any"), default="panel", help="Input type for --wait-id.")
     p.set_defaults(func=cmd_panel)
 
     p = sub.add_parser("status", help="Update shell status.")
@@ -1036,6 +1101,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--session-id")
     p.add_argument("--panel")
     p.add_argument("--context", action="append", help="Context item as Label=Value. Repeatable.")
+    p.add_argument("--wait-id", help="Declare that this status update expects browser input and emit the matching wait command.")
+    p.add_argument("--wait-type", choices=("choice", "panel", "any"), default="panel", help="Input type for --wait-id.")
     p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("choice", help="Offer lightweight browser choices.")

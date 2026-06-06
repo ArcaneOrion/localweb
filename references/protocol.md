@@ -85,7 +85,7 @@ panel 内嵌交互需要返回 CLI 时，通过 shell bridge 写入 Markdown 输
 
 默认情况下，`wait` 命令只消费第一个未消费的匹配浏览器输入，并在 `events.jsonl` 中记录 consumed 事件。纯展示 panel 不需要发布 `choices`，也不需要 `wait`。
 
-对于需要回到 CLI 的浏览器交互，先发布上下文输入，再在结束 CLI 回合前运行 `localweb wait`。浏览器点击或输入是持久化的 inbox 事件；它们不会自动出现在终端中，除非 CLI 命令去读取。
+对于需要回到 CLI 的浏览器交互，必须先发布上下文输入，再立刻运行对应 `localweb wait`，并保持本轮 CLI 打开直到输入被消费。浏览器点击或输入是持久化的 inbox 事件；它们不会自动出现在终端中，除非 CLI 命令去读取。`panel/status/choice` 只完成可见更新，`wait` 才把浏览器输入带回模型上下文。
 
 ```bash
 # 底部辅助 choices：stdout 是短值，如 source_path
@@ -93,6 +93,18 @@ uv run scripts/localweb.py wait --id next
 
 # panel 主交互：stdout 是 Markdown 原文
 uv run scripts/localweb.py wait --id review-context --type panel
+```
+
+发布可回传输入的命令应把等待态写进 stdout JSON。`choice` 会自动输出精确的 `next_command`；`panel` 或 `status` 只有在调用方声明 `--wait-id` 时输出精确命令。
+
+```json
+{
+  "status": "waiting_for_user",
+  "command_status": "ok",
+  "wait_required": true,
+  "wait": {"id": "next", "type": "choice"},
+  "next_command": "uv run scripts/localweb.py wait --id next"
+}
 ```
 
 `--type any` 可用于少数不关心来源的兼容场景；推荐 agent 默认明确选择 `choice` 或 `panel`。
