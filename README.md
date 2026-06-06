@@ -1,11 +1,11 @@
-# LocalWeb Skill
+# LocalWeb
 
 本地 HTML 伴生界面 skill，为 CLI agent 提供可视化投影层。
 
 ## 项目结构
 
 ```
-html-companion/          # skill 本体
+localweb/
 ├── SKILL.md            # skill 主文档
 ├── scripts/
 │   └── localweb.py     # CLI 工具
@@ -18,25 +18,26 @@ html-companion/          # skill 本体
 │   ├── protocol.md
 │   ├── html-patterns.md
 │   └── visual-style.md
-└── agents/             # agent 配置
-
-html-companion-design.md # 设计文档
+├── agents/             # agent 配置
+│   └── openai.yaml
+├── design.md           # 设计文档
+└── README.md           # 本文件
 ```
 
 ## 快速开始
 
 ```bash
 # 初始化项目
-uv run html-companion/scripts/localweb.py init
+uv run scripts/localweb.py init
 
 # 启动服务
-uv run html-companion/scripts/localweb.py serve --port 8765
+uv run scripts/localweb.py serve --port 8765
 
 # 健康检查
-uv run html-companion/scripts/localweb.py doctor
+uv run scripts/localweb.py doctor
 
 # 清理已消费事件（可选，定期执行）
-uv run html-companion/scripts/localweb.py clean
+uv run scripts/localweb.py clean
 ```
 
 ## 核心命令
@@ -60,4 +61,4 @@ uv run html-companion/scripts/localweb.py clean
 - 文件协议解耦实现
 - 轻量选择返回 CLI
 
-详见 `html-companion-design.md` 和 `html-companion/SKILL.md`。
+详见 `design.md` 和 `SKILL.md`。

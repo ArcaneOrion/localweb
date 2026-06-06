@@ -432,7 +432,7 @@ html-deck
 推荐结构：
 
 ```text
-html-companion/
+localweb/
 ├── SKILL.md
 ├── agents/
 │   └── openai.yaml
@@ -443,10 +443,11 @@ html-companion/
 │       ├── index.html
 │       ├── app.js
 │       └── theme.css
-└── references/
-    ├── protocol.md
-    ├── html-patterns.md
-    └── visual-style.md
+├── references/
+│   ├── protocol.md
+│   ├── html-patterns.md
+│   └── visual-style.md
+└── design.md
 ```
 
 `SKILL.md` 放核心流程：
