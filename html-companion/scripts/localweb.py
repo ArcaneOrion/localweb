@@ -387,6 +387,10 @@ def cmd_choice(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
     if not state_path(project).exists():
         init_project(project)
+
+    # 标记同 choice_id 的旧事件为已作废
+    obsolete_old_choices(project, args.id)
+
     choices = parse_options(args.option)
     state = load_state(project)
     state["active_choice_id"] = args.id
@@ -399,11 +403,31 @@ def cmd_choice(args: argparse.Namespace) -> None:
 
 
 def consumed_event_ids(project: Path) -> set[str]:
+    """返回已消费或已作废的 event_id 集合"""
     return {
         str(event.get("event_id"))
         for event in read_jsonl(events_path(project))
-        if event.get("type") == "choice_consumed" and event.get("event_id")
+        if event.get("type") in ("choice_consumed", "choice_obsoleted") and event.get("event_id")
     }
+
+
+def obsolete_old_choices(project: Path, choice_id: str) -> None:
+    """标记同 choice_id 的所有未消费事件为已作废"""
+    consumed = consumed_event_ids(project)
+    for event in read_jsonl(inbox_path(project)):
+        if event.get("type") == "choice" and event.get("choice_id") == choice_id:
+            event_id = str(event.get("event_id", ""))
+            if event_id and event_id not in consumed:
+                append_jsonl(
+                    events_path(project),
+                    {
+                        "type": "choice_obsoleted",
+                        "event_id": event_id,
+                        "choice_id": choice_id,
+                        "reason": "new choice created with same id",
+                        "ts": now_iso(),
+                    },
+                )
 
 
 def find_choice(project: Path, choice_id: str) -> dict[str, Any] | None:
@@ -466,6 +490,47 @@ def cmd_emit(args: argparse.Namespace) -> None:
     }
     append_jsonl(events_path(project), event)
     print_json({"status": "ok", "event": event})
+
+
+def cmd_clean(args: argparse.Namespace) -> None:
+    """清理 inbox 中已消费或已作废的事件"""
+    project = resolve_project(args.project)
+    require_initialized(project)
+
+    consumed = consumed_event_ids(project)
+    inbox = inbox_path(project)
+
+    # 读取所有未消费的事件
+    unconsumed_events = []
+    removed_count = 0
+    for event in read_jsonl(inbox):
+        event_id = str(event.get("event_id", ""))
+        if event_id and event_id in consumed:
+            removed_count += 1
+        else:
+            unconsumed_events.append(event)
+
+    # 重写 inbox，只保留未消费的
+    inbox.write_text("", encoding="utf-8")
+    for event in unconsumed_events:
+        append_jsonl(inbox, event)
+
+    # 记录清理事件
+    append_jsonl(
+        events_path(project),
+        {
+            "type": "inbox_cleaned",
+            "removed": removed_count,
+            "remaining": len(unconsumed_events),
+            "ts": now_iso(),
+        },
+    )
+
+    print_json({
+        "status": "ok",
+        "removed": removed_count,
+        "remaining": len(unconsumed_events),
+    })
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
@@ -709,6 +774,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--message")
     p.add_argument("--data", help="Extra JSON object merged into the event.")
     p.set_defaults(func=cmd_emit)
+
+    p = sub.add_parser("clean", help="Clean consumed events from inbox.")
+    add_project(p)
+    p.set_defaults(func=cmd_clean)
 
     return parser
 
