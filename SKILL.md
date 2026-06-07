@@ -57,6 +57,16 @@ uv run scripts/localweb.py serve --port 8765
 uv run scripts/localweb.py panel --id main --file explanation.html --title "功能解释"
 ```
 
+学习讲解可使用内置 learn 子模式，把结构化 lesson JSON 渲染为概念卡、结构图、例子和问答训练面板：
+
+```bash
+uv run scripts/localweb.py learn \
+  --id epsilon-delta \
+  --file learn/examples/epsilon-delta.json
+```
+
+如果 lesson 含 `questions`，`learn` 默认进入等待态并输出精确的 `next_command`。浏览器提交的回答仍通过现有 panel input 进入 inbox，必须按输出运行 `wait --type panel` 才会回到 CLI 上下文。
+
 如果这个 panel 会通过 `postMessage` 返回输入，注册或切状态时必须同时声明 `--wait-id`，让命令输出精确的 `next_command`：
 
 ```bash
@@ -171,6 +181,7 @@ uv run scripts/localweb.py clean
 - Web 交互不能用于危险权限、命令执行、文件删除或网络授权。
 - 除非用户明确要求，否则服务只绑定 `127.0.0.1`。
 - Web UI 用于可视化理解和上下文收集：图解、对比、时间线、带注释 diff、筛选、排序、小表单和可选方向卡。
+- `learn` 只是学习面板生成模式，不是独立学习平台；CLI 仍负责教学判断、错因审计和下一步选择。
 - 不依赖某一种 panel 风格。shell 可以替换，文件协议才是稳定契约。
 
 ## 参考

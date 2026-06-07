@@ -7,6 +7,7 @@
 import argparse
 import asyncio
 import fcntl
+import hashlib
 import json
 import re
 import secrets
@@ -37,6 +38,14 @@ def skill_root() -> Path:
 
 def shell_source_dir() -> Path:
     return skill_root() / "assets" / "shell"
+
+
+def learn_source_dir() -> Path:
+    return skill_root() / "learn"
+
+
+def learn_template_path() -> Path:
+    return learn_source_dir() / "templates" / "lesson.html"
 
 
 def resolve_project(project: str | None) -> Path:
@@ -76,10 +85,14 @@ def generated_assets_dir(project: Path) -> Path:
 
 
 def safe_id(value: str) -> str:
-    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip()).strip("-")
+    cleaned = slug_id(value)
     if not cleaned:
         raise SystemExit("id must contain at least one letter, digit, '_' or '-'")
     return cleaned
+
+
+def slug_id(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip()).strip("-")
 
 
 def read_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
@@ -431,6 +444,84 @@ def print_json(obj: dict[str, Any]) -> None:
     print(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
+def read_lesson(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        raise SystemExit(f"Lesson file not found: {path}")
+    try:
+        lesson = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Invalid lesson JSON at {path}: {exc}") from exc
+    if not isinstance(lesson, dict):
+        raise SystemExit("Lesson JSON must be an object")
+    if not str(lesson.get("title") or "").strip():
+        raise SystemExit("Lesson JSON must include a non-empty title")
+    return lesson
+
+
+def json_for_script(data: Any) -> str:
+    return (
+        json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
+def js_string(value: str) -> str:
+    return json_for_script(value)
+
+
+def render_learn_panel(lesson: dict[str, Any], input_id: str, panel_path: str, interactive: bool) -> str:
+    template = learn_template_path()
+    if not template.exists():
+        raise SystemExit(f"Missing learn template: {template}")
+    html = template.read_text(encoding="utf-8")
+    replacements = {
+        "__LOCALWEB_LESSON_DATA__": json_for_script(lesson),
+        "__LOCALWEB_INPUT_ID__": js_string(input_id)[1:-1],
+        "__LOCALWEB_PANEL_ID__": js_string(panel_path)[1:-1],
+        "__LOCALWEB_INTERACTIVE__": "true" if interactive else "false",
+    }
+    for marker, value in replacements.items():
+        if marker not in html:
+            raise SystemExit(f"Learn template missing marker: {marker}")
+        html = html.replace(marker, value)
+    return html
+
+
+def has_lesson_questions(lesson: dict[str, Any]) -> bool:
+    questions = lesson.get("questions")
+    return isinstance(questions, list) and any(isinstance(item, dict) for item in questions)
+
+
+def lesson_panel_id(args_id: str | None, lesson: dict[str, Any]) -> str:
+    if args_id is not None:
+        panel_id = safe_id(args_id)
+        return panel_id if panel_id.startswith("learn-") else f"learn-{panel_id}"
+
+    for raw in (lesson.get("id"), lesson.get("title")):
+        panel_id = slug_id(str(raw or ""))
+        if panel_id:
+            return panel_id if panel_id.startswith("learn-") else f"learn-{panel_id}"
+
+    digest = hashlib.sha1(str(lesson.get("title") or "learn").encode("utf-8")).hexdigest()[:10]
+    panel_id = f"learn-{digest}"
+    return panel_id if panel_id.startswith("learn-") else f"learn-{panel_id}"
+
+
+def learn_context(args_context: list[str] | None, lesson: dict[str, Any], input_mode: str) -> list[dict[str, str]]:
+    context = [
+        {"label": "Mode", "value": "learn"},
+        {"label": "Topic", "value": str(lesson.get("title") or "Learning panel")},
+        {"label": "Stage", "value": str(lesson.get("stage") or "Concept")},
+        {"label": "Input", "value": input_mode},
+    ]
+    extra = parse_context(args_context)
+    if extra:
+        context.extend(extra)
+    return context
+
+
 def wait_next_command(project: Path, include_project: bool, wait_id: str, wait_type: str) -> str:
     command = ["uv", "run", "scripts/localweb.py", "wait"]
     if include_project:
@@ -500,6 +591,47 @@ def cmd_panel(args: argparse.Namespace) -> None:
     }
     if args.wait_id:
         output.update(wait_response_fields(project, args.project is not None, args.wait_id, args.wait_type))
+    print_json(output)
+
+
+def cmd_learn(args: argparse.Namespace) -> None:
+    project = resolve_project(args.project)
+    if not state_path(project).exists():
+        init_project(project)
+
+    lesson = read_lesson(Path(args.file).expanduser().resolve())
+    panel_id = lesson_panel_id(args.id, lesson)
+    panel_path = f"panels/{panel_id}.html"
+    input_id = safe_id(args.input_id or panel_id)
+    should_wait = has_lesson_questions(lesson) if args.wait is None else bool(args.wait)
+    panel_html = render_learn_panel(lesson, input_id, panel_path, interactive=should_wait)
+
+    dst = panels_dir(project) / f"{panel_id}.html"
+    dst.write_text(panel_html, encoding="utf-8")
+
+    if should_wait:
+        obsolete_old_panel_inputs(project, input_id)
+
+    state = load_state(project)
+    if args.activate:
+        state["active_panel"] = panel_path
+    state["title"] = args.title or str(lesson.get("title") or "LocalWeb Learn")
+    state["status"] = "waiting_for_user" if should_wait else "learning"
+    state["context"] = learn_context(args.context, lesson, "panel_input" if should_wait else "display")
+    state["choices"] = []
+    state["active_choice_id"] = None
+    save_state(project, state, event_type="learn_panel_updated")
+
+    output: dict[str, Any] = {
+        "status": "waiting_for_user" if should_wait else "ok",
+        "mode": "learn",
+        "lesson": str(Path(args.file).expanduser().resolve()),
+        "panel": panel_path,
+        "path": str(dst),
+        "input_id": input_id if should_wait else None,
+    }
+    if should_wait:
+        output.update(wait_response_fields(project, args.project is not None, input_id, "panel"))
     print_json(output)
 
 
@@ -1093,6 +1225,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--wait-id", help="Declare that this panel expects browser input and emit the matching wait command.")
     p.add_argument("--wait-type", choices=("choice", "panel", "any"), default="panel", help="Input type for --wait-id.")
     p.set_defaults(func=cmd_panel)
+
+    p = sub.add_parser("learn", help="Render a structured learning panel.")
+    add_project(p)
+    p.add_argument("--file", required=True, help="Lesson JSON file.")
+    p.add_argument("--id", help="Panel id. Defaults to lesson id/title with a learn- prefix.")
+    p.add_argument("--title", help="Shell title. Defaults to lesson title.")
+    p.add_argument("--context", action="append", help="Extra context item as Label=Value. Repeatable.")
+    p.add_argument("--activate", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--input-id", help="Panel input id. Defaults to the generated panel id.")
+    p.add_argument(
+        "--wait",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Whether to enter waiting mode. Defaults to true when the lesson has questions.",
+    )
+    p.set_defaults(func=cmd_learn)
 
     p = sub.add_parser("status", help="Update shell status.")
     add_project(p)

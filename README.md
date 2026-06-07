@@ -42,6 +42,7 @@ uv run scripts/localweb.py serve --port 8765
 | `init` | 初始化 .localweb 目录结构；`--shell-only` 只刷新浏览器 shell |
 | `serve` | 启动 HTTP 服务器 |
 | `panel` | 注册 HTML panel |
+| `learn` | 从结构化 lesson JSON 生成学习面板 |
 | `status` | 更新状态和上下文 |
 | `choice` | 发布可选的建议型选择或上下文输入 |
 | `wait` | 显式等待 Web 输入返回 CLI，可启用 CLI 文字兜底 |
@@ -69,6 +70,10 @@ localweb/
 ```bash
 # 1. 生成可视化 panel
 uv run scripts/localweb.py panel --id main --file explanation.html
+
+# 或生成学习模式 panel；有 questions 时默认等待浏览器回答
+uv run scripts/localweb.py learn --file learn/examples/epsilon-delta.json --id epsilon-delta
+uv run scripts/localweb.py wait --id learn-epsilon-delta --type panel
 
 # 2. 更新状态和上下文
 uv run scripts/localweb.py status \
