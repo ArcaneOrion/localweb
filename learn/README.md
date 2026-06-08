@@ -2,6 +2,8 @@
 
 `localweb learn` is a focused learning panel mode. It renders a structured lesson JSON into a self-contained HTML panel with concept cards, a structure map, examples, and optional active-recall questions.
 
+**Important: the default lesson template is a reference/starter pattern, not a fixed learning framework. Adapt the panel shape to the learning content; use a custom `localweb panel` when the content needs a different structure.**
+
 The browser remains a visual worksheet. The CLI remains the tutor, main context, and control surface.
 
 ## Contract
@@ -39,5 +41,4 @@ The schema is intentionally small:
 - `questions`
 - `next`
 
-Use one lesson JSON per knowledge point. Reuse the default template across stages unless the learning activity needs a fundamentally different interface, such as proof-step sorting, a code sandbox, a dense graph browser, or a long-term review dashboard.
-
+Use one lesson JSON per knowledge point. **Reuse the default template only when its concept-card worksheet shape fits the activity.** For proof-step sorting, code tracing, protocol timelines, debugging walkthroughs, dense graph browsers, long-term review dashboards, or any activity with a different cognitive structure, generate a custom HTML panel instead.

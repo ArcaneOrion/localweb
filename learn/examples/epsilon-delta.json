@@ -14,16 +14,19 @@
     {
       "term": "epsilon",
       "definition": "目标误差上界。证明者要保证函数值和极限值的距离小于它。",
+      "back": "把 epsilon 想成对方给出的验收标准：无论它多小，证明都要能找到一个输入范围，让函数值误差落进这个标准里。",
       "note": "它由对方任意给出，不能由证明者挑。"
     },
     {
       "term": "delta",
       "definition": "输入距离上界。证明者根据 epsilon 选择它，用来限制 x 离 a 足够近。",
+      "back": "delta 是证明者能控制的旋钮。在线性例子里，把目标误差反推成 |x-a| 的上界，就能直接读出 delta。",
       "note": "delta 的任务是让目标误差自动成立。"
     },
     {
       "term": "误差反推",
       "definition": "从 |f(x)-L| 的表达式出发，找出它和 |x-a| 的关系。",
+      "back": "反推不是倒着证明结论，而是寻找一个足够强的输入条件。找到以后，正式证明仍然从 0 < |x-a| < delta 推回目标误差。",
       "note": "线性函数里通常可以直接提出常数倍。"
     }
   ],
@@ -36,16 +39,16 @@
         "detail": "|x-a| 表示 x 到 a 的距离"
       },
       {
-        "id": "target",
-        "label": "目标误差",
-        "kind": "current",
-        "detail": "|f(x)-L| < epsilon"
-      },
-      {
         "id": "input",
         "label": "输入约束",
         "kind": "current",
         "detail": "0 < |x-a| < delta"
+      },
+      {
+        "id": "target",
+        "label": "目标误差",
+        "kind": "current",
+        "detail": "|f(x)-L| < epsilon"
       },
       {
         "id": "next",
@@ -135,4 +138,3 @@
     }
   ]
 }
-

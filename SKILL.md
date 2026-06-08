@@ -51,13 +51,17 @@ uv run scripts/localweb.py serve --port 8765
 
 3. 为当前任务生成一个 self-contained HTML panel。
 
+> **高优先级要求：模板只是建议/参考，不是固定框架。生成 panel 前必须先判断当前内容的认知结构，再选择布局、视觉层级和交互方式。**
+>
+> **不要为了套用 `learn` 或任何示例模板，强行生成固定栏目、空 section 或不贴合内容的控件。学习、代码理解、调试、审查、研究总结等 panel 都应该根据内容调整显示结构。**
+
 优先使用完整 HTML 文档和内联 CSS/JS。临时草稿可以放在项目内任意位置，然后注册：
 
 ```bash
 uv run scripts/localweb.py panel --id main --file explanation.html --title "功能解释"
 ```
 
-学习讲解可使用内置 learn 子模式，把结构化 lesson JSON 渲染为概念卡、结构图、例子和问答训练面板：
+学习讲解可使用内置 learn 子模式，把结构化 lesson JSON 渲染为概念卡、结构图、例子和问答训练面板。**它是可复用参考模板，不是学习内容的默认框架；如果证明推导、代码路径、协议时序、调试推演或复习活动更适合自定义布局，应改用普通 `panel` 生成定制 HTML。**
 
 ```bash
 uv run scripts/localweb.py learn \
@@ -182,7 +186,7 @@ uv run scripts/localweb.py clean
 - 除非用户明确要求，否则服务只绑定 `127.0.0.1`。
 - Web UI 用于可视化理解和上下文收集：图解、对比、时间线、带注释 diff、筛选、排序、小表单和可选方向卡。
 - `learn` 只是学习面板生成模式，不是独立学习平台；CLI 仍负责教学判断、错因审计和下一步选择。
-- 不依赖某一种 panel 风格。shell 可以替换，文件协议才是稳定契约。
+- **不依赖某一种 panel 风格或模板。模板只能作为参考，内容结构才决定最终 panel。shell 可以替换，文件协议才是稳定契约。**
 
 ## 参考
 

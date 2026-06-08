@@ -142,34 +142,112 @@
     gap: 10px;
   }
   .concept {
-    border: 3px solid var(--line);
-    background: var(--paper);
-    padding: 12px;
+    position: relative;
+    display: block;
+    width: 100%;
+    min-height: 148px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    text-align: left;
+    perspective: 900px;
+    cursor: pointer;
   }
-  .concept strong { display: block; font-size: 18px; margin-bottom: 6px; }
-  .concept p { margin: 0; line-height: 1.55; }
-  .concept small { display: block; margin-top: 8px; color: var(--muted); line-height: 1.45; }
-  .map {
+  .concept:focus-visible {
+    outline: 4px solid var(--cyan);
+    outline-offset: 3px;
+  }
+  .concept-inner {
     position: relative;
     display: grid;
-    gap: 10px;
+    width: 100%;
+    min-height: 148px;
+    transform-style: preserve-3d;
+    transition: transform .28s ease;
   }
-  .node {
+  .concept.is-flipped .concept-inner { transform: rotateY(180deg); }
+  .concept-face {
+    grid-area: 1 / 1;
+    width: 100%;
+    min-height: 148px;
+    display: grid;
+    align-content: start;
+    gap: 8px;
     border: 3px solid var(--line);
     background: var(--paper);
     padding: 12px;
+    backface-visibility: hidden;
+    box-shadow: 4px 4px 0 var(--line);
   }
-  .node.current { background: var(--yellow); }
-  .node.next { background: #dff7ff; }
-  .node.prerequisite { background: #f4f0df; }
-  .node.warning { background: #ffe0d4; }
-  .node-top {
-    display: flex;
-    justify-content: space-between;
+  .concept-back {
+    background: #e8f8ff;
+    transform: rotateY(180deg);
+  }
+  .concept strong { display: block; font-size: 18px; }
+  .concept p { margin: 0; line-height: 1.55; }
+  .concept small { color: var(--muted); line-height: 1.45; }
+  .flip-hint {
+    align-self: end;
+    width: fit-content;
+    border: 2px solid var(--line);
+    background: var(--yellow);
+    padding: 2px 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 900;
+  }
+  .map {
+    position: relative;
+  }
+  .logic-map {
+    display: grid;
     gap: 8px;
+    padding: 20px;
+    border: 3px solid var(--line);
+    background:
+      linear-gradient(90deg, rgba(7,17,27,.06) 1px, transparent 1px),
+      linear-gradient(0deg, rgba(7,17,27,.06) 1px, transparent 1px),
+      rgba(255,255,255,.55);
+    background-size: 28px 28px;
+  }
+  .logic-ascii {
+    margin: 0;
+    min-height: 260px;
+    border: 3px solid var(--line);
+    background:
+      linear-gradient(90deg, rgba(7,17,27,.06) 1px, transparent 1px),
+      linear-gradient(0deg, rgba(7,17,27,.06) 1px, transparent 1px),
+      rgba(255,255,255,.65);
+    background-size: 28px 28px;
+    color: var(--line);
+    padding: 20px;
+    overflow: auto;
+    white-space: pre;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: clamp(13px, 1.2vw, 16px);
+    font-weight: 800;
+    line-height: 1.65;
+  }
+  .logic-node {
+    display: grid;
+    gap: 7px;
+    width: min(100%, 560px);
+    border: 3px solid var(--line);
+    background: var(--paper);
+    padding: 12px;
+    box-shadow: 5px 5px 0 var(--line);
+  }
+  .logic-node.current { background: var(--yellow); }
+  .logic-node.next { background: #dff7ff; }
+  .logic-node.prerequisite { background: #f4f0df; }
+  .logic-node.warning { background: #ffe0d4; }
+  .node-top {
+    display: grid;
+    gap: 7px;
     align-items: start;
   }
-  .node b { font-size: 17px; }
+  .logic-node b { font-size: 17px; }
   .tag {
     border: 2px solid var(--line);
     background: var(--deck);
@@ -178,27 +256,47 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 11px;
     white-space: nowrap;
+    width: fit-content;
   }
-  .node p { margin: 8px 0 0; color: #273b49; line-height: 1.45; }
-  .edges {
+  .logic-node p { margin: 0; color: #273b49; line-height: 1.45; }
+  .logic-arrow {
     display: grid;
-    gap: 6px;
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 2px dashed rgba(7,17,27,.45);
-  }
-  .edge {
-    display: flex;
+    grid-template-columns: 34px minmax(0, 1fr);
     gap: 8px;
     align-items: center;
-    color: #243845;
-    font-size: 14px;
-    line-height: 1.35;
+    width: min(100%, 560px);
+    min-height: 46px;
+    color: var(--line);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-weight: 900;
   }
-  .edge code {
+  .logic-arrow-mark {
+    display: grid;
+    place-items: center;
+    font-size: 28px;
+  }
+  .logic-arrow-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 12px;
+  }
+  .logic-arrow-label::before,
+  .logic-arrow-label::after {
+    content: "";
+    height: 3px;
+    flex: 1;
+    min-width: 12px;
+    background: var(--line);
+  }
+  .logic-arrow-label span {
     border: 2px solid var(--line);
-    background: var(--paper);
-    padding: 2px 5px;
+    background: var(--panel);
+    color: var(--line);
+    padding: 3px 7px;
+    white-space: nowrap;
+    text-align: center;
   }
   .examples {
     display: grid;
@@ -261,7 +359,23 @@
   .next-item {
     border: 3px solid var(--line);
     background: var(--paper);
+    color: inherit;
     padding: 10px;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: 4px 4px 0 var(--line);
+    transition: transform .14s ease, background .14s ease, box-shadow .14s ease;
+  }
+  .next-item:hover,
+  .next-item:focus-visible {
+    background: #e8f8ff;
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0 var(--line);
+  }
+  .next-item.is-selected {
+    background: var(--yellow);
+    transform: translate(3px, 3px);
+    box-shadow: 1px 1px 0 var(--line);
   }
   .next-item strong { display: block; margin-bottom: 6px; }
   .next-item p { margin: 0; color: #354b59; font-size: 14px; line-height: 1.45; }
@@ -319,6 +433,8 @@
     .hero, .layout, .submit-row { grid-template-columns: 1fr; }
     .stage { min-width: 0; }
     .examples, .next-grid { grid-template-columns: 1fr; }
+    .logic-node,
+    .logic-arrow { width: 100%; }
   }
 </style>
 </head>
@@ -393,6 +509,7 @@ const lesson = JSON.parse(document.getElementById('lesson-data').textContent);
 const inputId = "__LOCALWEB_INPUT_ID__";
 const interactive = __LOCALWEB_INTERACTIVE__;
 const panelId = "__LOCALWEB_PANEL_ID__";
+let selectedNext = null;
 
 function text(value, fallback = '') {
   return value == null ? fallback : String(value);
@@ -431,34 +548,79 @@ function renderBasics() {
 function renderConcepts() {
   const concepts = list(lesson.concepts);
   byId('concepts').innerHTML = concepts.length
-    ? concepts.map((item) => `<article class="concept">
-        <strong>${esc(item.term || '概念')}</strong>
-        <p>${esc(item.definition || '')}</p>
-        ${item.note ? `<small>${esc(item.note)}</small>` : ''}
-      </article>`).join('')
+    ? concepts.map((item) => {
+      const back = item.back || item.detail || item.note || '把这个概念放回当前问题里，检查它承担的是目标、手段还是桥梁。';
+      return `<button class="concept" type="button" aria-pressed="false">
+        <span class="concept-inner">
+          <span class="concept-face concept-front">
+            <strong>${esc(item.term || '概念')}</strong>
+            <p>${esc(item.definition || '')}</p>
+            <span class="flip-hint">点击翻面</span>
+          </span>
+          <span class="concept-face concept-back">
+            <strong>${esc(item.term || '概念')}：补充视角</strong>
+            <p>${esc(back)}</p>
+            ${item.note && item.note !== back ? `<small>${esc(item.note)}</small>` : ''}
+            <span class="flip-hint">点击返回</span>
+          </span>
+        </span>
+      </button>`;
+    }).join('')
     : '<div class="empty">暂无概念卡。</div>';
 }
 
 function renderMap() {
   const structure = lesson.structure && typeof lesson.structure === 'object' ? lesson.structure : {};
+  const diagram = text(structure.diagram).trim();
+  if (diagram) {
+    byId('map').innerHTML = `<pre class="logic-ascii">${esc(diagram)}</pre>`;
+    return;
+  }
   const nodes = list(structure.nodes);
   const edges = list(structure.edges);
-  const nodeHtml = nodes.length
-    ? nodes.map((node) => `<article class="node ${esc(node.kind || '')}">
-        <div class="node-top">
-          <b>${esc(node.label || node.id || '节点')}</b>
-          <span class="tag">${esc(node.kind || 'node')}</span>
+  if (!nodes.length) {
+    byId('map').innerHTML = '<div class="empty">暂无结构节点。</div>';
+    return;
+  }
+  const nodeKey = (node, fallbackId = 'node') => text(node.id || node.label || fallbackId);
+  const nodeMap = new Map(nodes.map((node, index) => [
+    nodeKey(node, `node-${index}`),
+    node,
+  ]));
+  const nodeCard = (node, fallbackId = 'node') => `<article class="logic-node ${esc(node.kind || '')}" data-node-id="${esc(nodeKey(node, fallbackId))}">
+      <div class="node-top">
+        <b>${esc(node.label || node.id || '节点')}</b>
+        <span class="tag">${esc(node.kind || 'node')}</span>
+      </div>
+      ${node.detail ? `<p>${esc(node.detail)}</p>` : ''}
+    </article>`;
+  let rows = '';
+  if (edges.length) {
+    const connectedNodeIds = new Set();
+    rows = edges.map((edge, index) => {
+      const fromId = text(edge.from);
+      const toId = text(edge.to);
+      if (fromId) connectedNodeIds.add(fromId);
+      if (toId) connectedNodeIds.add(toId);
+      const fromNode = nodeMap.get(fromId) || { id: fromId, label: fromId, kind: 'support' };
+      const toNode = nodeMap.get(toId) || { id: toId, label: toId, kind: 'support' };
+      const shouldShowFrom = index === 0 || text(edges[index - 1]?.to) !== fromId;
+      return `${shouldShowFrom ? nodeCard(fromNode, fromId) : ''}
+        <div class="logic-arrow" data-from="${esc(fromId)}" data-to="${esc(toId)}">
+          <div class="logic-arrow-mark">↓</div>
+          <div class="logic-arrow-label"><span>${esc(edge.label || '推出')}</span></div>
         </div>
-        ${node.detail ? `<p>${esc(node.detail)}</p>` : ''}
-      </article>`).join('')
-    : '<div class="empty">暂无结构节点。</div>';
-  const edgeHtml = edges.length
-    ? `<div class="edges">${edges.map((edge) => `<div class="edge">
-        <code>${esc(edge.from)}</code><span>-></span><code>${esc(edge.to)}</code>
-        ${edge.label ? `<span>${esc(edge.label)}</span>` : ''}
-      </div>`).join('')}</div>`
-    : '';
-  byId('map').innerHTML = nodeHtml + edgeHtml;
+        ${nodeCard(toNode, toId)}`;
+    }).join('');
+    const unconnectedRows = nodes
+      .filter((node, index) => !connectedNodeIds.has(nodeKey(node, `node-${index}`)))
+      .map((node, index) => nodeCard(node, `unconnected-${index}`))
+      .join('');
+    rows = `${rows}${unconnectedRows}`;
+  } else {
+    rows = nodes.map((node, index) => nodeCard(node, `node-${index}`)).join('');
+  }
+  byId('map').innerHTML = `<div class="logic-map">${rows}</div>`;
 }
 
 function renderExamples() {
@@ -506,11 +668,39 @@ function renderQuestions() {
 function renderNext() {
   const next = list(lesson.next);
   byId('next').innerHTML = next.length
-    ? next.map((item) => `<article class="next-item">
+    ? next.map((item) => `<button class="next-item" type="button" data-next-id="${esc(item.id || item.label || '')}" aria-pressed="false">
         <strong>${esc(item.label || item.id || '下一步')}</strong>
         <p>${esc(item.description || '')}</p>
-      </article>`).join('')
+      </button>`).join('')
     : '<div class="empty">暂无下一步建议。</div>';
+}
+
+function bindConceptCards() {
+  document.querySelectorAll('.concept').forEach((card) => {
+    card.addEventListener('click', () => {
+      const flipped = !card.classList.contains('is-flipped');
+      card.classList.toggle('is-flipped', flipped);
+      card.setAttribute('aria-pressed', flipped ? 'true' : 'false');
+    });
+  });
+}
+
+function bindNextCards() {
+  byId('next').addEventListener('click', (event) => {
+    const card = event.target.closest('.next-item');
+    if (!card) return;
+    document.querySelectorAll('.next-item').forEach((item) => {
+      item.classList.remove('is-selected');
+      item.setAttribute('aria-pressed', 'false');
+    });
+    card.classList.add('is-selected');
+    card.setAttribute('aria-pressed', 'true');
+    selectedNext = {
+      id: card.dataset.nextId || '',
+      label: card.querySelector('strong')?.textContent || '',
+      description: card.querySelector('p')?.textContent || '',
+    };
+  });
 }
 
 function collectAnswers() {
@@ -541,12 +731,14 @@ function markdownPayload() {
     `- lesson_id: ${text(lesson.id, '')}`,
     `- stage: ${text(lesson.stage, '')}`,
     `- confidence: ${confidence}/5`,
+    `- selected_next: ${selectedNext ? selectedNext.id : ''}`,
     '',
     '## Answers',
   ];
   answers.forEach((item) => {
     lines.push('', `### ${item.id}`, '', `- type: ${item.type}`, `- prompt: ${item.prompt}`, '', item.answer ? item.answer : '_未作答_');
   });
+  lines.push('', '## Selected Next', '', selectedNext ? `- ${selectedNext.label}: ${selectedNext.description}` : '_未选择_');
   lines.push('', '## Confusion', '', confusion ? confusion : '_无_');
   return lines.join('\n');
 }
@@ -582,8 +774,9 @@ renderMap();
 renderExamples();
 renderQuestions();
 renderNext();
+bindConceptCards();
+bindNextCards();
 bindSubmit();
 </script>
 </body>
 </html>
-
