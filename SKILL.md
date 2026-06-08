@@ -25,6 +25,15 @@ uv run scripts/localweb.py init --project /path/to/project
 uv run scripts/localweb.py serve --project /path/to/project --port 8765
 ```
 
+多开端口或并行 CLI 工作流时，使用 `--session <id>` 隔离 state/events/inbox。端口只是浏览器入口，session 才是上下文和输入归属：
+
+```bash
+uv run scripts/localweb.py init --session review-auth
+uv run scripts/localweb.py serve --session review-auth --port 8765
+```
+
+同一条工作流里的 `panel`、`status`、`choice`、`wait`、`clean` 和 `doctor` 都应使用同一个 `--session`。默认 session 是 `cli-main`，兼容旧的 `.localweb/state.json` 路径；非默认 session 写入 `.localweb/sessions/<id>/`。
+
 `serve` 启动后，把输出的 `url` 告诉用户。
 
 如果旧项目启动时报 shell 缺少写入令牌支持，运行：
@@ -150,6 +159,8 @@ uv run scripts/localweb.py wait --id next
 
 `choice` 成功发布后会输出 `status: "waiting_for_user"`、`wait_required: true` 和 `next_command`。模型必须把这个 JSON 当作控制流提示，而不是普通完成态。
 
+如果命令使用了非默认 `--session`，输出的 `next_command` 会自动带上相同 session；必须原样执行，避免从其他 session 的 inbox 消费输入。
+
 如果用户更想直接在终端输入文字，可以显式启用 CLI 兜底：
 
 ```bash
@@ -174,11 +185,13 @@ uv run scripts/localweb.py clean
 - **choice ID 可以重复使用**：创建新的 `choice --id foo` 时，会自动作废同 ID 的所有未消费事件，防止 `wait` 读到过期点击。
 - **等待态输出 next_command**：`choice` 会自动输出下一条 `wait` 命令；`panel` 和 `status` 在传入 `--wait-id` 时也会输出 `next_command`。
 - **Inbox 会累积**：浏览器输入会留在 inbox，直到被消费或清理。定期运行 `clean`。
+- **Session 隔离**：默认 `cli-main` 使用 `.localweb/state.json` 等旧路径；非默认 session 使用 `.localweb/sessions/<id>/` 下的 state/events/inbox。`serve` 多开端口时会在 `.localweb/runtime/servers/` 登记实例，供 `doctor` 诊断。
 - **事件类型**：`choice_received` / `panel_input_received`（server 收到浏览器输入）、`choice_consumed` / `panel_input_consumed`（输入被 wait 读取）、`choice_obsoleted` / `panel_input_obsoleted`（同 ID 旧事件被替换）、`cli_override`（显式 CLI 文字兜底）、`inbox_cleaned`（维护操作）。
 
 ## 规则
 
 - 所有运行时产物必须写在目标项目的 `.localweb/` 下。
+- 多条并行工作流必须使用不同 `--session`；同一工作流必须在发布、展示、等待和清理命令中保持 session 一致。
 - 不要把运行时状态写进 skill 安装目录。
 - CLI 是唯一主模型上下文。
 - 发布任何可回传浏览器输入后，必须立刻运行对应 `wait` 并保持本轮 CLI 打开；否则用户在浏览器里说的话只会留在 inbox，不会进入模型上下文。

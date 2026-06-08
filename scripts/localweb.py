@@ -9,6 +9,7 @@ import asyncio
 import fcntl
 import hashlib
 import json
+import os
 import re
 import secrets
 import shlex
@@ -56,16 +57,26 @@ def localweb_dir(project: Path) -> Path:
     return project / ".localweb"
 
 
-def state_path(project: Path) -> Path:
-    return localweb_dir(project) / "state.json"
+def session_id(value: str | None) -> str:
+    return safe_id(value or DEFAULT_SESSION)
 
 
-def events_path(project: Path) -> Path:
-    return localweb_dir(project) / "events.jsonl"
+def session_dir(project: Path, session: str = DEFAULT_SESSION) -> Path:
+    if session == DEFAULT_SESSION:
+        return localweb_dir(project)
+    return localweb_dir(project) / "sessions" / session
 
 
-def inbox_path(project: Path) -> Path:
-    return localweb_dir(project) / "inbox" / "events.jsonl"
+def state_path(project: Path, session: str = DEFAULT_SESSION) -> Path:
+    return session_dir(project, session) / "state.json"
+
+
+def events_path(project: Path, session: str = DEFAULT_SESSION) -> Path:
+    return session_dir(project, session) / "events.jsonl"
+
+
+def inbox_path(project: Path, session: str = DEFAULT_SESSION) -> Path:
+    return session_dir(project, session) / "inbox" / "events.jsonl"
 
 
 def shell_dir(project: Path) -> Path:
@@ -82,6 +93,18 @@ def assets_dir(project: Path) -> Path:
 
 def generated_assets_dir(project: Path) -> Path:
     return assets_dir(project) / "generated"
+
+
+def runtime_dir(project: Path) -> Path:
+    return localweb_dir(project) / "runtime"
+
+
+def servers_dir(project: Path) -> Path:
+    return runtime_dir(project) / "servers"
+
+
+def server_entry_path(project: Path, server_id: str) -> Path:
+    return servers_dir(project) / f"{server_id}.json"
 
 
 def safe_id(value: str) -> str:
@@ -158,10 +181,10 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return out
 
 
-def default_state() -> dict[str, Any]:
+def default_state(session: str = DEFAULT_SESSION) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
-        "session_id": DEFAULT_SESSION,
+        "session_id": session,
         "write_token": secrets.token_urlsafe(32),
         "title": "LocalWeb",
         "status": DEFAULT_STATE,
@@ -258,14 +281,16 @@ def default_panel_html() -> str:
 """
 
 
-def ensure_layout(project: Path) -> None:
+def ensure_layout(project: Path, session: str = DEFAULT_SESSION) -> None:
     for path in (
         localweb_dir(project),
         panels_dir(project),
-        localweb_dir(project) / "inbox",
+        session_dir(project, session),
+        session_dir(project, session) / "inbox",
         assets_dir(project),
         generated_assets_dir(project),
         shell_dir(project),
+        servers_dir(project),
     ):
         path.mkdir(parents=True, exist_ok=True)
 
@@ -314,11 +339,16 @@ def copy_shell_assets(project: Path, force: bool) -> tuple[list[str], list[str]]
     return created, preserved
 
 
-def init_project(project: Path, force: bool = False, shell_only: bool = False) -> dict[str, Any]:
+def init_project(
+    project: Path,
+    force: bool = False,
+    shell_only: bool = False,
+    session: str = DEFAULT_SESSION,
+) -> dict[str, Any]:
     if shell_only:
-        require_initialized(project)
+        require_initialized(project, session)
 
-    ensure_layout(project)
+    ensure_layout(project, session)
     created: list[str] = []
     preserved: list[str] = []
 
@@ -327,10 +357,11 @@ def init_project(project: Path, force: bool = False, shell_only: bool = False) -
         created.extend(shell_created)
         preserved.extend(shell_preserved)
         append_jsonl(
-            events_path(project),
+            events_path(project, session),
             {
                 "type": "shell_refreshed",
                 "project_root": str(project),
+                "session_id": session,
                 "ts": now_iso(),
             },
         )
@@ -338,15 +369,17 @@ def init_project(project: Path, force: bool = False, shell_only: bool = False) -
             "status": "ok",
             "project_root": str(project),
             "localweb_dir": str(localweb_dir(project)),
+            "session_id": session,
+            "session_dir": str(session_dir(project, session)),
             "created": created,
             "preserved": preserved,
-            "next_command": f"uv run scripts/localweb.py serve --project {project} --port 8765",
+            "next_command": serve_next_command(project, session, include_project=True),
         }
 
     defaults: list[tuple[Path, str]] = [
-        (state_path(project), json.dumps(default_state(), ensure_ascii=False, indent=2) + "\n"),
-        (events_path(project), ""),
-        (inbox_path(project), ""),
+        (state_path(project, session), json.dumps(default_state(session), ensure_ascii=False, indent=2) + "\n"),
+        (events_path(project, session), ""),
+        (inbox_path(project, session), ""),
         (panels_dir(project) / "main.html", default_panel_html()),
     ]
     for path, content in defaults:
@@ -361,10 +394,11 @@ def init_project(project: Path, force: bool = False, shell_only: bool = False) -
     preserved.extend(shell_preserved)
 
     append_jsonl(
-        events_path(project),
+        events_path(project, session),
         {
             "type": "initialized",
             "project_root": str(project),
+            "session_id": session,
             "ts": now_iso(),
         },
     )
@@ -372,34 +406,50 @@ def init_project(project: Path, force: bool = False, shell_only: bool = False) -
         "status": "ok",
         "project_root": str(project),
         "localweb_dir": str(localweb_dir(project)),
+        "session_id": session,
+        "session_dir": str(session_dir(project, session)),
         "created": created,
         "preserved": preserved,
-        "next_command": f"uv run scripts/localweb.py serve --project {project} --port 8765",
+        "next_command": serve_next_command(project, session, include_project=True),
     }
 
 
-def require_initialized(project: Path) -> None:
-    if not state_path(project).exists():
-        raise SystemExit(f"{localweb_dir(project)} is not initialized. Run: localweb.py init --project {project}")
+def require_initialized(project: Path, session: str = DEFAULT_SESSION) -> None:
+    if not state_path(project, session).exists():
+        raise SystemExit(
+            f"{session_dir(project, session)} is not initialized. "
+            f"Run: localweb.py init --project {project} --session {session}"
+        )
 
 
-def load_state(project: Path) -> dict[str, Any]:
-    state = read_json(state_path(project), default_state())
+def load_state(project: Path, session: str = DEFAULT_SESSION) -> dict[str, Any]:
+    state = read_json(state_path(project, session), default_state(session))
     if state.get("schema_version") != SCHEMA_VERSION:
         state["schema_version"] = SCHEMA_VERSION
     if not state.get("write_token"):
         state["write_token"] = secrets.token_urlsafe(32)
-        write_json(state_path(project), state)
+        write_json(state_path(project, session), state)
+    if session != DEFAULT_SESSION and state.get("session_id") != session:
+        state["session_id"] = session
+        write_json(state_path(project, session), state)
     return state
 
 
-def save_state(project: Path, state: dict[str, Any], event_type: str = "state_updated") -> None:
+def save_state(
+    project: Path,
+    state: dict[str, Any],
+    event_type: str = "state_updated",
+    session: str = DEFAULT_SESSION,
+) -> None:
     state["updated_at"] = now_iso()
-    write_json(state_path(project), state)
+    if session != DEFAULT_SESSION:
+        state["session_id"] = session
+    write_json(state_path(project, session), state)
     append_jsonl(
-        events_path(project),
+        events_path(project, session),
         {
             "type": event_type,
+            "session_id": state.get("session_id", session),
             "status": state.get("status"),
             "active_panel": state.get("active_panel"),
             "active_choice_id": state.get("active_choice_id"),
@@ -522,17 +572,41 @@ def learn_context(args_context: list[str] | None, lesson: dict[str, Any], input_
     return context
 
 
-def wait_next_command(project: Path, include_project: bool, wait_id: str, wait_type: str) -> str:
+def serve_next_command(project: Path, session: str, include_project: bool) -> str:
+    command = ["uv", "run", "scripts/localweb.py", "serve"]
+    if include_project:
+        command.extend(["--project", str(project)])
+    if session != DEFAULT_SESSION:
+        command.extend(["--session", session])
+    command.extend(["--port", "8765"])
+    return shlex.join(command)
+
+
+def wait_next_command(
+    project: Path,
+    session: str,
+    include_project: bool,
+    wait_id: str,
+    wait_type: str,
+) -> str:
     command = ["uv", "run", "scripts/localweb.py", "wait"]
     if include_project:
         command.extend(["--project", str(project)])
+    if session != DEFAULT_SESSION:
+        command.extend(["--session", session])
     command.extend(["--id", wait_id])
     if wait_type != "choice":
         command.extend(["--type", wait_type])
     return shlex.join(command)
 
 
-def wait_response_fields(project: Path, include_project: bool, wait_id: str, wait_type: str) -> dict[str, Any]:
+def wait_response_fields(
+    project: Path,
+    session: str,
+    include_project: bool,
+    wait_id: str,
+    wait_type: str,
+) -> dict[str, Any]:
     return {
         "command_status": "ok",
         "state_status": "waiting_for_user",
@@ -540,8 +614,9 @@ def wait_response_fields(project: Path, include_project: bool, wait_id: str, wai
         "wait": {
             "id": wait_id,
             "type": wait_type,
+            "session_id": session,
         },
-        "next_command": wait_next_command(project, include_project, wait_id, wait_type),
+        "next_command": wait_next_command(project, session, include_project, wait_id, wait_type),
     }
 
 
@@ -560,20 +635,22 @@ def wait_hint_fields() -> dict[str, Any]:
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    print_json(init_project(resolve_project(args.project), force=args.force, shell_only=args.shell_only))
+    session = session_id(args.session)
+    print_json(init_project(resolve_project(args.project), force=args.force, shell_only=args.shell_only, session=session))
 
 
 def cmd_panel(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
-    if not state_path(project).exists():
-        init_project(project)
+    session = session_id(args.session)
+    if not state_path(project, session).exists():
+        init_project(project, session=session)
     panel_id = safe_id(args.id)
     src = Path(args.file).expanduser().resolve()
     if not src.exists() or not src.is_file():
         raise SystemExit(f"Panel file not found: {src}")
     dst = panels_dir(project) / f"{panel_id}.html"
     dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    state = load_state(project)
+    state = load_state(project, session)
     if args.activate:
         state["active_panel"] = f"panels/{panel_id}.html"
     if args.title:
@@ -583,21 +660,22 @@ def cmd_panel(args: argparse.Namespace) -> None:
         state["context"] = context
     if args.wait_id:
         state["status"] = "waiting_for_user"
-    save_state(project, state, event_type="panel_updated")
+    save_state(project, state, event_type="panel_updated", session=session)
     output: dict[str, Any] = {
         "status": state["status"] if args.wait_id else "ok",
         "panel": f"panels/{panel_id}.html",
         "path": str(dst),
     }
     if args.wait_id:
-        output.update(wait_response_fields(project, args.project is not None, args.wait_id, args.wait_type))
+        output.update(wait_response_fields(project, session, args.project is not None, args.wait_id, args.wait_type))
     print_json(output)
 
 
 def cmd_learn(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
-    if not state_path(project).exists():
-        init_project(project)
+    session = session_id(args.session)
+    if not state_path(project, session).exists():
+        init_project(project, session=session)
 
     lesson = read_lesson(Path(args.file).expanduser().resolve())
     panel_id = lesson_panel_id(args.id, lesson)
@@ -610,9 +688,9 @@ def cmd_learn(args: argparse.Namespace) -> None:
     dst.write_text(panel_html, encoding="utf-8")
 
     if should_wait:
-        obsolete_old_panel_inputs(project, input_id)
+        obsolete_old_panel_inputs(project, input_id, session)
 
-    state = load_state(project)
+    state = load_state(project, session)
     if args.activate:
         state["active_panel"] = panel_path
     state["title"] = args.title or str(lesson.get("title") or "LocalWeb Learn")
@@ -620,7 +698,7 @@ def cmd_learn(args: argparse.Namespace) -> None:
     state["context"] = learn_context(args.context, lesson, "panel_input" if should_wait else "display")
     state["choices"] = []
     state["active_choice_id"] = None
-    save_state(project, state, event_type="learn_panel_updated")
+    save_state(project, state, event_type="learn_panel_updated", session=session)
 
     output: dict[str, Any] = {
         "status": "waiting_for_user" if should_wait else "ok",
@@ -631,15 +709,16 @@ def cmd_learn(args: argparse.Namespace) -> None:
         "input_id": input_id if should_wait else None,
     }
     if should_wait:
-        output.update(wait_response_fields(project, args.project is not None, input_id, "panel"))
+        output.update(wait_response_fields(project, session, args.project is not None, input_id, "panel"))
     print_json(output)
 
 
 def cmd_status(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
-    if not state_path(project).exists():
-        init_project(project)
-    state = load_state(project)
+    session = session_id(args.session)
+    if not state_path(project, session).exists():
+        init_project(project, session=session)
+    state = load_state(project, session)
     if args.wait_id and args.state not in (None, "waiting_for_user"):
         raise SystemExit("--wait-id requires --state waiting_for_user or no --state")
     if args.state is not None:
@@ -655,11 +734,11 @@ def cmd_status(args: argparse.Namespace) -> None:
     context = parse_context(args.context)
     if context is not None:
         state["context"] = context
-    save_state(project, state)
+    save_state(project, state, session=session)
     is_waiting = state.get("status") == "waiting_for_user"
     output: dict[str, Any] = {"status": "waiting_for_user" if is_waiting else "ok", "state": state}
     if args.wait_id:
-        output.update(wait_response_fields(project, args.project is not None, args.wait_id, args.wait_type))
+        output.update(wait_response_fields(project, session, args.project is not None, args.wait_id, args.wait_type))
     elif state.get("status") == "waiting_for_user":
         output.update(wait_hint_fields())
     print_json(output)
@@ -667,34 +746,35 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 def cmd_choice(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
-    if not state_path(project).exists():
-        init_project(project)
+    session = session_id(args.session)
+    if not state_path(project, session).exists():
+        init_project(project, session=session)
 
     # 标记同 choice_id 的旧事件为已作废
-    obsolete_old_choices(project, args.id)
+    obsolete_old_choices(project, args.id, session)
 
     choices = parse_options(args.option)
-    state = load_state(project)
+    state = load_state(project, session)
     state["active_choice_id"] = args.id
     state["choices"] = choices
     state["status"] = "waiting_for_user"
     if args.title:
         state["title"] = args.title
-    save_state(project, state, event_type="choice_requested")
+    save_state(project, state, event_type="choice_requested", session=session)
     output: dict[str, Any] = {
         "status": "waiting_for_user",
         "choice_id": args.id,
         "choices": choices,
     }
-    output.update(wait_response_fields(project, args.project is not None, args.id, "choice"))
+    output.update(wait_response_fields(project, session, args.project is not None, args.id, "choice"))
     print_json(output)
 
 
-def consumed_event_ids(project: Path) -> set[str]:
+def consumed_event_ids(project: Path, session: str = DEFAULT_SESSION) -> set[str]:
     """返回已消费或已作废的 event_id 集合"""
     return {
         str(event.get("event_id"))
-        for event in read_jsonl(events_path(project))
+        for event in read_jsonl(events_path(project, session))
         if (
             event.get("type")
             in ("choice_consumed", "choice_obsoleted", "panel_input_consumed", "panel_input_obsoleted")
@@ -703,47 +783,49 @@ def consumed_event_ids(project: Path) -> set[str]:
     }
 
 
-def obsolete_old_choices(project: Path, choice_id: str) -> None:
+def obsolete_old_choices(project: Path, choice_id: str, session: str = DEFAULT_SESSION) -> None:
     """标记同 choice_id 的所有未消费事件为已作废"""
-    consumed = consumed_event_ids(project)
-    for event in read_jsonl(inbox_path(project)):
+    consumed = consumed_event_ids(project, session)
+    for event in read_jsonl(inbox_path(project, session)):
         if event.get("type") == "choice" and event.get("choice_id") == choice_id:
             event_id = str(event.get("event_id", ""))
             if event_id and event_id not in consumed:
                 append_jsonl(
-                    events_path(project),
+                    events_path(project, session),
                     {
                         "type": "choice_obsoleted",
                         "event_id": event_id,
                         "choice_id": choice_id,
+                        "session_id": session,
                         "reason": "new choice created with same id",
                         "ts": now_iso(),
                     },
                 )
 
 
-def obsolete_old_panel_inputs(project: Path, input_id: str) -> None:
+def obsolete_old_panel_inputs(project: Path, input_id: str, session: str = DEFAULT_SESSION) -> None:
     """标记同 input_id 的所有未消费 panel 输入为已作废"""
-    consumed = consumed_event_ids(project)
-    for event in read_jsonl(inbox_path(project)):
+    consumed = consumed_event_ids(project, session)
+    for event in read_jsonl(inbox_path(project, session)):
         if event.get("type") == "panel_input" and event.get("input_id") == input_id:
             event_id = str(event.get("event_id", ""))
             if event_id and event_id not in consumed:
                 append_jsonl(
-                    events_path(project),
+                    events_path(project, session),
                     {
                         "type": "panel_input_obsoleted",
                         "event_id": event_id,
                         "input_id": input_id,
+                        "session_id": session,
                         "reason": "new panel input received with same id",
                         "ts": now_iso(),
                     },
                 )
 
 
-def find_choice(project: Path, choice_id: str) -> dict[str, Any] | None:
-    consumed = consumed_event_ids(project)
-    for event in read_jsonl(inbox_path(project)):
+def find_choice(project: Path, choice_id: str, session: str = DEFAULT_SESSION) -> dict[str, Any] | None:
+    consumed = consumed_event_ids(project, session)
+    for event in read_jsonl(inbox_path(project, session)):
         if event.get("type") != "choice":
             continue
         if event.get("choice_id") != choice_id:
@@ -754,9 +836,9 @@ def find_choice(project: Path, choice_id: str) -> dict[str, Any] | None:
     return None
 
 
-def find_panel_input(project: Path, input_id: str) -> dict[str, Any] | None:
-    consumed = consumed_event_ids(project)
-    for event in read_jsonl(inbox_path(project)):
+def find_panel_input(project: Path, input_id: str, session: str = DEFAULT_SESSION) -> dict[str, Any] | None:
+    consumed = consumed_event_ids(project, session)
+    for event in read_jsonl(inbox_path(project, session)):
         if event.get("type") != "panel_input":
             continue
         if event.get("input_id") != input_id:
@@ -767,14 +849,15 @@ def find_panel_input(project: Path, input_id: str) -> dict[str, Any] | None:
     return None
 
 
-def consume_choice(project: Path, choice_id: str, event: dict[str, Any]) -> str:
+def consume_choice(project: Path, choice_id: str, event: dict[str, Any], session: str = DEFAULT_SESSION) -> str:
     event_id = str(event.get("event_id"))
     append_jsonl(
-        events_path(project),
+        events_path(project, session),
         {
             "type": "choice_consumed",
             "event_id": event_id,
             "choice_id": choice_id,
+            "session_id": session,
             "value": event.get("value"),
             "ts": now_iso(),
         },
@@ -782,15 +865,16 @@ def consume_choice(project: Path, choice_id: str, event: dict[str, Any]) -> str:
     return str(event.get("value", ""))
 
 
-def consume_panel_input(project: Path, input_id: str, event: dict[str, Any]) -> str:
+def consume_panel_input(project: Path, input_id: str, event: dict[str, Any], session: str = DEFAULT_SESSION) -> str:
     event_id = str(event.get("event_id"))
     text = str(event.get("text", ""))
     append_jsonl(
-        events_path(project),
+        events_path(project, session),
         {
             "type": "panel_input_consumed",
             "event_id": event_id,
             "input_id": input_id,
+            "session_id": session,
             "text": text,
             "ts": now_iso(),
         },
@@ -798,23 +882,33 @@ def consume_panel_input(project: Path, input_id: str, event: dict[str, Any]) -> 
     return text
 
 
-def find_wait_event(project: Path, wait_id: str, wait_type: str) -> tuple[str, dict[str, Any]] | None:
+def find_wait_event(
+    project: Path,
+    wait_id: str,
+    wait_type: str,
+    session: str = DEFAULT_SESSION,
+) -> tuple[str, dict[str, Any]] | None:
     if wait_type in ("choice", "any"):
-        event = find_choice(project, wait_id)
+        event = find_choice(project, wait_id, session)
         if event:
             return ("choice", event)
     if wait_type in ("panel", "any"):
-        event = find_panel_input(project, wait_id)
+        event = find_panel_input(project, wait_id, session)
         if event:
             return ("panel", event)
     return None
 
 
-def consume_wait_event(project: Path, wait_id: str, result: tuple[str, dict[str, Any]]) -> str:
+def consume_wait_event(
+    project: Path,
+    wait_id: str,
+    result: tuple[str, dict[str, Any]],
+    session: str = DEFAULT_SESSION,
+) -> str:
     event_type, event = result
     if event_type == "choice":
-        return consume_choice(project, wait_id, event)
-    return consume_panel_input(project, wait_id, event)
+        return consume_choice(project, wait_id, event, session)
+    return consume_panel_input(project, wait_id, event, session)
 
 
 def cli_override_event(wait_id: str, wait_type: str, value: str) -> dict[str, Any]:
@@ -834,7 +928,8 @@ def cli_override_event(wait_id: str, wait_type: str, value: str) -> dict[str, An
 
 def cmd_wait(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
-    require_initialized(project)
+    session = session_id(args.session)
+    require_initialized(project, session)
     start = time.monotonic()
     timeout = args.timeout
     wait_type = args.type
@@ -851,9 +946,9 @@ def cmd_wait(args: argparse.Namespace) -> None:
         select_module = select
 
     while True:
-        result = find_wait_event(project, args.id, wait_type)
+        result = find_wait_event(project, args.id, wait_type, session)
         if result:
-            print(consume_wait_event(project, args.id, result))
+            print(consume_wait_event(project, args.id, result, session))
             return
 
         if cli_fallback and select_module is not None:
@@ -864,11 +959,11 @@ def cmd_wait(args: argparse.Namespace) -> None:
                 except (EOFError, OSError):
                     user_input = ""
                 if user_input:
-                    result = find_wait_event(project, args.id, wait_type)
+                    result = find_wait_event(project, args.id, wait_type, session)
                     if result:
-                        print(consume_wait_event(project, args.id, result))
+                        print(consume_wait_event(project, args.id, result, session))
                         return
-                    append_jsonl(events_path(project), cli_override_event(args.id, wait_type, user_input))
+                    append_jsonl(events_path(project, session), cli_override_event(args.id, wait_type, user_input))
                     print(user_input)
                     return
 
@@ -880,8 +975,9 @@ def cmd_wait(args: argparse.Namespace) -> None:
 
 def cmd_emit(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
-    if not state_path(project).exists():
-        init_project(project)
+    session = session_id(args.session)
+    if not state_path(project, session).exists():
+        init_project(project, session=session)
     data: dict[str, Any] = {}
     if args.data:
         try:
@@ -894,20 +990,22 @@ def cmd_emit(args: argparse.Namespace) -> None:
     event = {
         "type": args.type,
         "message": args.message,
+        "session_id": session,
         "ts": now_iso(),
         **data,
     }
-    append_jsonl(events_path(project), event)
+    append_jsonl(events_path(project, session), event)
     print_json({"status": "ok", "event": event})
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
     """清理 inbox 中已消费或已作废的事件"""
     project = resolve_project(args.project)
-    require_initialized(project)
+    session = session_id(args.session)
+    require_initialized(project, session)
 
-    consumed = consumed_event_ids(project)
-    inbox = inbox_path(project)
+    consumed = consumed_event_ids(project, session)
+    inbox = inbox_path(project, session)
 
     with with_jsonl_lock(inbox) as lock:
         try:
@@ -928,9 +1026,10 @@ def cmd_clean(args: argparse.Namespace) -> None:
 
     # 记录清理事件
     append_jsonl(
-        events_path(project),
+        events_path(project, session),
         {
             "type": "inbox_cleaned",
+            "session_id": session,
             "removed": removed_count,
             "remaining": len(unconsumed_events),
             "ts": now_iso(),
@@ -939,13 +1038,62 @@ def cmd_clean(args: argparse.Namespace) -> None:
 
     print_json({
         "status": "ok",
+        "session_id": session,
         "removed": removed_count,
         "remaining": len(unconsumed_events),
     })
 
 
+def process_is_running(pid: Any) -> bool:
+    try:
+        pid_int = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid_int <= 0:
+        return False
+    try:
+        os.kill(pid_int, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def read_server_entries(project: Path) -> list[dict[str, Any]]:
+    if not servers_dir(project).exists():
+        return []
+    entries: list[dict[str, Any]] = []
+    for path in sorted(servers_dir(project).glob("*.json")):
+        entry = read_json(path, {})
+        if not entry:
+            continue
+        entry["path"] = str(path)
+        entry["is_running"] = process_is_running(entry.get("pid")) and entry.get("status") != "stopped"
+        entries.append(entry)
+    return entries
+
+
+def write_server_entry(project: Path, server_id: str, entry: dict[str, Any]) -> None:
+    ensure_layout(project, str(entry.get("session_id") or DEFAULT_SESSION))
+    write_json(server_entry_path(project, server_id), entry)
+
+
+def mark_server_stopped(project: Path, server_id: str) -> None:
+    path = server_entry_path(project, server_id)
+    entry = read_json(path, {})
+    if not entry:
+        return
+    entry["status"] = "stopped"
+    entry["stopped_at"] = now_iso()
+    write_json(path, entry)
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
+    session = session_id(args.session)
     checks: list[dict[str, Any]] = []
 
     checks.append({"name": "python", "status": "ok", "value": sys.version.split()[0]})
@@ -962,17 +1110,27 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
     writable = project.exists() and project.is_dir() and os_access_write(project)
     checks.append({"name": "project-writable", "status": "ok" if writable else "error", "value": str(project)})
-    checks.append({"name": "localweb-initialized", "status": "ok" if state_path(project).exists() else "missing", "value": str(localweb_dir(project))})
-    if state_path(project).exists():
+    checks.append({
+        "name": "localweb-initialized",
+        "status": "ok" if state_path(project, session).exists() else "missing",
+        "value": str(session_dir(project, session)),
+    })
+    if state_path(project, session).exists():
         checks.append({
             "name": "shell-write-token",
             "status": "ok" if shell_supports_write_token(project) else "error",
             "value": str(shell_dir(project) / "app.js"),
-            "hint": f"uv run scripts/localweb.py init --project {project} --shell-only",
+            "hint": f"uv run scripts/localweb.py init --project {project} --session {session} --shell-only",
         })
 
     status = "ok" if all(c["status"] in {"ok", "missing"} for c in checks) else "error"
-    print_json({"status": status, "project_root": str(project), "checks": checks})
+    print_json({
+        "status": status,
+        "project_root": str(project),
+        "session_id": session,
+        "checks": checks,
+        "servers": read_server_entries(project),
+    })
 
 
 def os_access_write(path: Path) -> bool:
@@ -1012,7 +1170,7 @@ def ensure_inside(root: Path, candidate: Path) -> Path:
     return resolved
 
 
-def create_app(project: Path):
+def create_app(project: Path, session: str = DEFAULT_SESSION):
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
@@ -1052,7 +1210,7 @@ def create_app(project: Path):
 
     @app.get("/api/state")
     async def api_state() -> JSONResponse:
-        return JSONResponse(load_state(project))
+        return JSONResponse(load_state(project, session))
 
     @app.get("/api/stream")
     async def api_stream():
@@ -1060,10 +1218,10 @@ def create_app(project: Path):
             last_state = 0.0
             while True:
                 try:
-                    current = state_path(project).stat().st_mtime
+                    current = state_path(project, session).stat().st_mtime
                     if current != last_state:
                         last_state = current
-                        state = load_state(project)
+                        state = load_state(project, session)
                         yield f"event: state\ndata: {json.dumps(state, ensure_ascii=False)}\n\n"
                 except FileNotFoundError:
                     yield "event: error\ndata: {\"message\":\"state missing\"}\n\n"
@@ -1074,7 +1232,7 @@ def create_app(project: Path):
     @app.post("/api/choice")
     async def api_choice(request: Request) -> JSONResponse:
         body = await request_json_object(request)
-        state = load_state(project)
+        state = load_state(project, session)
         require_write_token(request, state)
         active_choice_id = str(state.get("active_choice_id") or "").strip()
         choice_id = str(body.get("choice_id") or active_choice_id).strip()
@@ -1100,14 +1258,14 @@ def create_app(project: Path):
             "session_id": state.get("session_id", DEFAULT_SESSION),
             "ts": now_iso(),
         }
-        append_jsonl(inbox_path(project), event)
-        append_jsonl(events_path(project), {**event, "type": "choice_received"})
+        append_jsonl(inbox_path(project, session), event)
+        append_jsonl(events_path(project, session), {**event, "type": "choice_received"})
         return JSONResponse({"status": "ok", "event": event})
 
     @app.post("/api/panel-input")
     async def api_panel_input(request: Request) -> JSONResponse:
         body = await request_json_object(request)
-        state = load_state(project)
+        state = load_state(project, session)
         require_write_token(request, state)
         input_id = str(body.get("input_id") or body.get("id") or "").strip()
         text = body.get("text")
@@ -1121,7 +1279,7 @@ def create_app(project: Path):
         if meta is not None and not isinstance(meta, dict):
             raise HTTPException(status_code=400, detail="meta must be an object")
 
-        obsolete_old_panel_inputs(project, input_id)
+        obsolete_old_panel_inputs(project, input_id, session)
         event = {
             "event_id": uuid.uuid4().hex,
             "type": "panel_input",
@@ -1133,8 +1291,8 @@ def create_app(project: Path):
             "session_id": state.get("session_id", DEFAULT_SESSION),
             "ts": now_iso(),
         }
-        append_jsonl(inbox_path(project), event)
-        append_jsonl(events_path(project), {**event, "type": "panel_input_received"})
+        append_jsonl(inbox_path(project, session), event)
+        append_jsonl(events_path(project, session), {**event, "type": "panel_input_received"})
         return JSONResponse({"status": "ok", "event": event})
 
     @app.get("/shell/{rel_path:path}")
@@ -1151,18 +1309,24 @@ def create_app(project: Path):
 
     @app.get("/health")
     async def health() -> JSONResponse:
-        return JSONResponse({"status": "ok", "project_root": str(project), "localweb_dir": str(lw_root)})
+        return JSONResponse({
+            "status": "ok",
+            "project_root": str(project),
+            "localweb_dir": str(lw_root),
+            "session_id": session,
+        })
 
     return app
 
 
 def cmd_serve(args: argparse.Namespace) -> None:
     project = resolve_project(args.project)
-    if not state_path(project).exists():
+    session = session_id(args.session)
+    if not state_path(project, session).exists():
         if args.init:
-            init_project(project)
+            init_project(project, session=session)
         else:
-            raise SystemExit(f"{localweb_dir(project)} is not initialized. Run init or pass --init.")
+            raise SystemExit(f"{session_dir(project, session)} is not initialized. Run init or pass --init.")
     require_current_shell(project)
 
     host = args.host
@@ -1171,14 +1335,31 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
     port = choose_port(host, args.port)
     url = f"http://{host}:{port}"
+    server_id = uuid.uuid4().hex[:12]
+    server_entry = {
+        "server_id": server_id,
+        "status": "running",
+        "host": host,
+        "port": port,
+        "url": url,
+        "pid": os.getpid(),
+        "session_id": session,
+        "project_root": str(project),
+        "started_at": now_iso(),
+        "heartbeat_at": now_iso(),
+    }
+    write_server_entry(project, server_id, server_entry)
     print_json(
         {
             "status": "ok",
             "url": url,
             "host": host,
             "port": port,
+            "server_id": server_id,
+            "session_id": session,
             "project_root": str(project),
             "localweb_dir": str(localweb_dir(project)),
+            "session_dir": str(session_dir(project, session)),
             "note": "Press Ctrl+C to stop.",
         }
     )
@@ -1186,7 +1367,10 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
     import uvicorn
 
-    uvicorn.run(create_app(project), host=host, port=port, log_level=args.log_level)
+    try:
+        uvicorn.run(create_app(project, session), host=host, port=port, log_level=args.log_level)
+    finally:
+        mark_server_stopped(project, server_id)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1196,18 +1380,24 @@ def build_parser() -> argparse.ArgumentParser:
     def add_project(p: argparse.ArgumentParser) -> None:
         p.add_argument("--project", help="Project root. Defaults to current working directory.")
 
+    def add_session(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--session", default=DEFAULT_SESSION, help=f"LocalWeb session id. Defaults to {DEFAULT_SESSION}.")
+
     p = sub.add_parser("init", help="Initialize project-level .localweb directory.")
     add_project(p)
+    add_session(p)
     p.add_argument("--force", action="store_true", help="Overwrite default files and shell assets.")
     p.add_argument("--shell-only", action="store_true", help="Refresh shell assets without touching state, inbox, or panels.")
     p.set_defaults(func=cmd_init)
 
     p = sub.add_parser("doctor", help="Check runtime health.")
     add_project(p)
+    add_session(p)
     p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("serve", help="Serve the local browser companion.")
     add_project(p)
+    add_session(p)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--init", action="store_true", help="Initialize .localweb first if missing.")
@@ -1217,6 +1407,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("panel", help="Register an HTML panel.")
     add_project(p)
+    add_session(p)
     p.add_argument("--id", required=True)
     p.add_argument("--file", required=True)
     p.add_argument("--title")
@@ -1228,6 +1419,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("learn", help="Render a structured learning panel.")
     add_project(p)
+    add_session(p)
     p.add_argument("--file", required=True, help="Lesson JSON file.")
     p.add_argument("--id", help="Panel id. Defaults to lesson id/title with a learn- prefix.")
     p.add_argument("--title", help="Shell title. Defaults to lesson title.")
@@ -1244,6 +1436,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("status", help="Update shell status.")
     add_project(p)
+    add_session(p)
     p.add_argument("--state")
     p.add_argument("--title")
     p.add_argument("--session-id")
@@ -1255,6 +1448,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("choice", help="Offer lightweight browser choices.")
     add_project(p)
+    add_session(p)
     p.add_argument("--id", required=True)
     p.add_argument("--title")
     p.add_argument("--option", action="append", required=True, help="Choice as A=Label. Repeatable.")
@@ -1262,6 +1456,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("wait", help="Wait for browser input and print its value.")
     add_project(p)
+    add_session(p)
     p.add_argument("--id", required=True)
     p.add_argument("--type", choices=("choice", "panel", "any"), default="choice", help="Input type to consume.")
     p.add_argument("--timeout", type=float, default=-1, help="Seconds to wait. Negative means forever.")
@@ -1271,6 +1466,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("emit", help="Append an event to events.jsonl.")
     add_project(p)
+    add_session(p)
     p.add_argument("--type", required=True)
     p.add_argument("--message")
     p.add_argument("--data", help="Extra JSON object merged into the event.")
@@ -1278,6 +1474,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("clean", help="Clean consumed and obsoleted events from inbox.")
     add_project(p)
+    add_session(p)
     p.set_defaults(func=cmd_clean)
 
     return parser

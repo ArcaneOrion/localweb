@@ -14,6 +14,7 @@
 - 📁 **文件协议解耦** - 独立、可审计、项目级
 - 🔒 **默认安全** - localhost 绑定、无自动执行
 - 🧹 **自动维护** - choice ID 重用安全、inbox 可清理
+- 🧭 **Session 隔离** - 多开端口时可用 `--session` 隔离 state/events/inbox
 
 ## 🚀 快速开始
 
@@ -25,6 +26,15 @@ uv run scripts/localweb.py init
 uv run scripts/localweb.py serve --port 8765
 
 # 在浏览器打开 http://127.0.0.1:8765
+```
+
+多开端口或并行任务时，为每条 CLI 工作流指定 session：
+
+```bash
+uv run scripts/localweb.py init --session review-auth
+uv run scripts/localweb.py serve --session review-auth --port 8765
+uv run scripts/localweb.py choice --session review-auth --id next --option risks="看风险点"
+uv run scripts/localweb.py wait --session review-auth --id next
 ```
 
 ## 📖 使用场景
@@ -49,6 +59,8 @@ uv run scripts/localweb.py serve --port 8765
 | `clean` | 清理已消费和已作废事件 |
 | `doctor` | 环境检查 |
 | `emit` | 追加自定义事件 |
+
+所有命令都支持 `--project <path>`；涉及状态、输入或服务的命令还支持 `--session <id>`。默认 session 是 `cli-main`，兼容旧的 `.localweb/state.json`、`.localweb/events.jsonl` 和 `.localweb/inbox/events.jsonl` 路径；非默认 session 写入 `.localweb/sessions/<id>/`。
 
 ## 📂 项目结构
 
@@ -106,6 +118,7 @@ uv run scripts/localweb.py wait --id next --cli-fallback
 - **Web 为投影层** - 浏览器做可视化和低风险上下文输入，不处理权限
 - **文件协议解耦** - CLI/Server/Browser 通过文件通信
 - **显式控制流** - 发布可回传 Web 输入后，命令输出 `next_command` 指向对应 `wait`
+- **Session 为身份边界** - 端口只是服务入口；多开时用 session 隔离上下文和 inbox
 
 ## 📚 文档
 
